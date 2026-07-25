@@ -1,0 +1,55 @@
+[project]
+name = "kinescore"
+version = "0.1.0"
+description = "Physics-plausibility benchmark for AI-generated robot video."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Core stays small on purpose. No diffusers anywhere, not even as an extra:
+# the input contract is video files, so any model that can write an mp4 can be
+# scored without kinescore knowing anything about how it generates.
+dependencies = [
+    "numpy>=1.26,<3",
+    "torch>=2.5,<3",
+    "pytorch-kinematics>=0.10,<1",
+    "robot-descriptions>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dino  = ["transformers>=4.55", "huggingface-hub", "safetensors"]
+video = ["imageio>=2.37", "imageio-ffmpeg"]
+bench = ["pandas", "pyarrow", "scipy", "matplotlib", "tqdm", "pyyaml"]
+dev   = ["pytest", "pytest-cov", "ruff"]
+
+[project.scripts]
+kinescore = "kinescore.cli.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Default run is CPU-only, network-free and checkpoint-free, and should finish
+# in under a minute. Everything that needs a GPU, the network, a trained
+# checkpoint or ffmpeg is opt-in via markers.
+addopts = "-q -m 'not gpu and not net and not ckpt' --cov=kinescore --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["tests"]
+markers = [
+    "gpu: requires a CUDA device",
+    "net: requires network access or a warm HF cache",
+    "ckpt: requires a trained checkpoint on disk",
+    "ffmpeg: requires the ffprobe/ffmpeg binaries",
+    "slow: takes more than a few seconds",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501"]

@@ -1,0 +1,140 @@
+{
+  "generated_at": "2026-07-26T02:05:58+0700",
+  "generator_sha256": "078891d89d05d0c8b1b9acee21e585919980f84539a10b6a34ef87900ffc02d0",
+  "source_a": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-ciasc",
+  "source_b": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-fkjepa",
+  "versions": {
+    "python": "3.10.12",
+    "torch": "2.7.1",
+    "numpy": "2.2.6",
+    "pytorch-kinematics": "0.10.0",
+    "robot-descriptions": "2.0.0"
+  },
+  "seed": 0,
+  "fixtures": {
+    "golden_fk": {
+      "file": "golden_fk.npz",
+      "size_bytes": 93990,
+      "n_arrays": 19,
+      "source_qualnames": [
+        "FrankaFK.forward",
+        "FrankaFK.forward_transforms",
+        "FrankaFK.ee_pose"
+      ],
+      "source_sha256": {
+        "A/judge/fk.py": "36a07ab83ec33f58295c285a84a6a818e89b230a8bde5cd9cf163fe5b7579b9c"
+      },
+      "rng_seeds": "torch.manual_seed(0)"
+    },
+    "golden_physics": {
+      "file": "golden_physics.npz",
+      "size_bytes": 567484,
+      "n_arrays": 962,
+      "source_qualnames": [
+        "KinematicConsistency.rigidity_residual_mm",
+        "KinematicConsistency.rigidity_wobble_mm",
+        "KinematicConsistency.command_consistency_mm",
+        "KinematicConsistency.report",
+        "PhysicsConsistency.velocity",
+        "PhysicsConsistency.acceleration",
+        "PhysicsConsistency.jerk",
+        "PhysicsConsistency.speed_stats",
+        "PhysicsConsistency.accel_stats",
+        "PhysicsConsistency.mean_jerk",
+        "PhysicsConsistency.accel_violation_frac",
+        "PhysicsConsistency.kinetic_energy",
+        "PhysicsConsistency.limit_violation",
+        "PhysicsConsistency.angular_velocity",
+        "PhysicsConsistency.angular_stats",
+        "PhysicsConsistency.joint_feasibility",
+        "PhysicsConsistency.energy",
+        "PhysicsConsistency.momentum_continuity",
+        "PhysicsConsistency.invariant_residuals",
+        "PhysicsConsistency.motion_samples",
+        "PhysicsConsistency.report",
+        "PhysicsConsistency.speed_profile",
+        "PhysicsConsistency.profile_w1"
+      ],
+      "source_sha256": {
+        "A/judge/fk.py": "36a07ab83ec33f58295c285a84a6a818e89b230a8bde5cd9cf163fe5b7579b9c",
+        "A/judge/physics.py": "fba2ff609601053d5e6c05731765f6dc2435d723781c6956441849320387d188"
+      },
+      "rng_seeds": "torch.manual_seed(0); high_freq_jitter uses torch.Generator().manual_seed(0) per (archetype,dt)"
+    },
+    "golden_head": {
+      "file": "golden_head.npz",
+      "size_bytes": 113762,
+      "n_arrays": 31,
+      "source_qualnames": [
+        "pool_patch_tokens",
+        "DinoPoseHead.forward",
+        "AttentivePoseHead.forward"
+      ],
+      "source_sha256": {
+        "A/judge/pixel_judge.py": "4de2fb1579245f7f7e91affcef3d1a275d10ba61dc441d22089c6c82087d4b33"
+      },
+      "rng_seeds": "torch.manual_seed(0), reseeded before each of the 4 heads"
+    },
+    "golden_predict_pose": {
+      "file": "golden_predict_pose.npz",
+      "size_bytes": 1788,
+      "n_arrays": 5,
+      "source_qualnames": [
+        "PixelPhysicsJudge.predict_pose"
+      ],
+      "source_sha256": {
+        "A/judge/pixel_judge.py": "4de2fb1579245f7f7e91affcef3d1a275d10ba61dc441d22089c6c82087d4b33",
+        "A/judge/fk.py": "36a07ab83ec33f58295c285a84a6a818e89b230a8bde5cd9cf163fe5b7579b9c"
+      },
+      "rng_seeds": "torch.manual_seed(0) (raw input is a fixed linspace, not randomly drawn)"
+    },
+    "golden_reference": {
+      "file": "golden_reference.npz",
+      "size_bytes": 54835,
+      "n_arrays": 158,
+      "source_qualnames": [
+        "RealMotionReference.build",
+        "RealMotionReference.invariance_score",
+        "RealMotionReference.w1",
+        "RealMotionReference.kfd"
+      ],
+      "source_sha256": {
+        "A/judge/fk.py": "36a07ab83ec33f58295c285a84a6a818e89b230a8bde5cd9cf163fe5b7579b9c",
+        "A/judge/physics.py": "fba2ff609601053d5e6c05731765f6dc2435d723781c6956441849320387d188",
+        "B/models/evaluation/motion_reference.py": "3d1fdc755ecc02bb255bdacb42f61a38fe1951282d2b866080cbf3f57819fba4"
+      },
+      "rng_seeds": "12 real rollouts: torch.Generator().manual_seed(1000+i) for i in range(12); 5 test cases: seeds 2000/3000/4000 where randomness is used"
+    },
+    "golden_gr1_fk": {
+      "file": "golden_gr1_fk.npz",
+      "size_bytes": 18306,
+      "n_arrays": 16,
+      "source_qualnames": [
+        "GR1FK.forward_transforms",
+        "GR1FK.ee_pose",
+        "GR1FK.keypoints_fk"
+      ],
+      "source_sha256": {
+        "B/models/kinematics/gr1_fk.py": "746b8e4d3bebce2e66e7759126eb4982e077f8a3d1801026369ef00ddad4a211"
+      },
+      "rng_seeds": "torch.manual_seed(0)"
+    },
+    "golden_ckpt_head": {
+      "file": "golden_ckpt_head.npz",
+      "size_bytes": 6072,
+      "n_arrays": 10,
+      "source_qualnames": [
+        "AttentivePoseHead.forward"
+      ],
+      "source_sha256": {
+        "A/judge/pixel_judge.py": "4de2fb1579245f7f7e91affcef3d1a275d10ba61dc441d22089c6c82087d4b33"
+      },
+      "rng_seeds": "torch.Generator().manual_seed(0) per checkpoint"
+    }
+  },
+  "panda_urdf_path": "/home/hunght23/.cache/robot_descriptions/example-robot-data/robots/panda_description/urdf/panda.urdf",
+  "panda_urdf_sha256": "63792d2679f22c4e41cda2c4d9d903644e628970ad0656b9eec8485113941555",
+  "wall_time_s": 9.77,
+  "total_bytes": 856237,
+  "budget_bytes": 4194304
+}
