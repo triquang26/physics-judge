@@ -1,5 +1,20 @@
 """The legacy CLS-token MLP head.
 
+LEGACY -- not on any wired path
+--------------------------------
+Superseded by :class:`~kinescore.heads.attentive.AttentivePoseHead` (the live
+Franka path -- see ``readers/squashed.py``). This head is kept for
+provenance / possible future use, but it is **not** part of either of
+kinescore's two live pose-reader paths (Franka -> ``AttentivePoseHead`` ->
+:class:`~kinescore.readers.squashed.SquashedPoseReader`; GR-1 ->
+:class:`~kinescore.heads.heteroscedastic.ReadoutV2Head` ->
+:class:`~kinescore.readers.heteroscedastic.HeteroscedasticPoseReader` /
+:class:`~kinescore.readers.checkpoint_v2.ReadoutV2PoseReader`). There is no
+checkpoint loader or reader composition for :class:`DinoPoseHead` in
+``readers/``, and none of ``cli/``, ``training/`` import this module on a
+default (no-flag) code path. See ``docs/PROVENANCE.md`` for the correction
+that made ReadoutV2 first-class and this head explicitly secondary.
+
 Ported **verbatim** from ``judge.pixel_judge.DinoPoseHead``. Kept for
 checkpoints trained with ``pool="cls"`` and as the simplest possible
 comparison point against the attentive probe (:mod:`kinescore.heads.attentive`)

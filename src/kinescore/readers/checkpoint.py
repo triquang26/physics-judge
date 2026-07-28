@@ -36,6 +36,29 @@ On top of the source format, :func:`save` additionally persists
 have the caller guess them from which checkpoint file was passed in.
 ``load_state_dict(strict=True)`` is preserved throughout; nothing here ever
 loads partial or renamed weights.
+
+:func:`load_reader` -- the auto-routing entry point
+-----------------------------------------------------
+``load`` (above) only ever understood :class:`AttentivePoseHead`. Any other
+checkpoint family -- notably :class:`~kinescore.heads.heteroscedastic.ReadoutV2Head`,
+the GR-1 / production-page path -- had no on-disk loader in this package at
+all, so CLI wiring (``cli/_scoring.py::build_scorer``) used to hard-fail with
+``NotImplementedError`` on anything that wasn't ``limit_semantics="squashed"``.
+:func:`load_reader` is the fix: it peeks at a checkpoint's ``cfg`` dict (no
+model construction yet) and routes to the right loader by *shape*, not by a
+caller-supplied flag --
+:func:`~kinescore.readers.checkpoint_v2.is_readout_v2_cfg` checks for the
+``d_model``/``temporal_nhead`` keys that only a saved ``ReadoutV2Head`` cfg
+has (neither exists in any ``AttentivePoseHead`` cfg format this package
+targets, current or legacy -- see ``tests/test_checkpoint_legacy_cfg.py``);
+anything else falls through to this module's own ``load`` +
+:class:`~kinescore.readers.squashed.SquashedPoseReader`, unchanged. Both
+branches return a ready-to-score :class:`~kinescore.core.reader.PoseReader`,
+so a caller (``build_scorer``, a notebook, a future robot's CLI) never needs
+to know which head family a ``--reader`` path is -- see
+``readers/checkpoint_v2.py``'s module docstring for what the ``ReadoutV2Head``
+branch additionally handles (sigma calibration, the FK/aux dimension split
+for GR-1's 17 FK joints + 12 hand DoF).
 """
 from __future__ import annotations
 
@@ -46,10 +69,10 @@ from typing import Any, Dict, Optional
 import torch
 
 from kinescore.core.clip import ViewLayout
-from kinescore.core.reader import LimitSemantics
+from kinescore.core.reader import LimitSemantics, PoseReader
 from kinescore.heads.attentive import AttentivePoseHead
 
-__all__ = ["LoadedCheckpoint", "save", "load"]
+__all__ = ["LoadedCheckpoint", "save", "load", "load_reader"]
 
 # Default limit_semantics for a checkpoint that predates this field. Every
 # real checkpoint at this format (judge_v3l, judge_v3l_mv, judge_reward) was
@@ -183,3 +206,68 @@ def load(path: str, device: str = "cpu") -> LoadedCheckpoint:
         limit_semantics=cfg.get("limit_semantics", _LEGACY_LIMIT_SEMANTICS),
         cfg=cfg, meta=meta,
     )
+
+
+def load_reader(path: str, *, robot: Any, view_layout: ViewLayout,
+                device: str = "cpu", reader_id: Optional[str] = None,
+                backbone: Optional[Any] = None,
+                sigma_scale: Optional[Any] = None) -> PoseReader:
+    """Load ``path`` into a ready-to-score :class:`PoseReader`, auto-routed
+    by the checkpoint's own cfg shape. See this module's docstring
+    ("``load_reader`` -- the auto-routing entry point") for the routing rule
+    and ``readers/checkpoint_v2.py`` for what the ``ReadoutV2Head`` branch
+    does beyond a bare ``load_state_dict``.
+
+    This is the function ``cli/_scoring.py::build_scorer`` calls; a caller
+    that already knows its checkpoint's family can still use :func:`load` /
+    :func:`~kinescore.readers.checkpoint_v2.load_head` directly for
+    finer-grained control (e.g. building an
+    :class:`~kinescore.readers.ensemble.EnsemblePoseReader` from several
+    ``ReadoutV2Head`` files).
+
+    Parameters
+    ----------
+    robot:
+        A constructed :class:`~kinescore.core.robot.RobotSpec`. Its
+        ``.name`` must equal the checkpoint's declared ``robot_name`` in
+        spirit (not enforced here -- :class:`~kinescore.core.scorer.Scorer`
+        checks ``reader.robot_name == robot.name`` at construction, which is
+        the actual enforcement point); ``.n_joints``/``.q_lo``/``.q_hi``
+        size the returned reader.
+    backbone:
+        Optional pre-built backbone (skips constructing a new
+        :class:`~kinescore.backbones.dino.FeatureBackbone`).
+    sigma_scale:
+        ``ReadoutV2Head`` branch only -- forwarded to
+        :func:`~kinescore.readers.checkpoint_v2.resolve_sigma_scale` as an
+        override. Ignored (with no error) for the squashed branch, which has
+        no sigma to calibrate.
+    """
+    ck = torch.load(path, map_location="cpu")
+    cfg: Dict[str, Any] = dict(ck.get("cfg", {}))
+
+    from kinescore.readers import checkpoint_v2
+
+    if checkpoint_v2.is_readout_v2_cfg(cfg):
+        return checkpoint_v2.load_reader(
+            path, robot=robot, view_layout=view_layout, device=device,
+            reader_id=reader_id, backbone=backbone, sigma_scale=sigma_scale)
+
+    loaded = load(path, device=device)
+    if loaded.n_joints != robot.n_joints:
+        raise ValueError(
+            f"checkpoint {path!r} was trained for {loaded.n_joints} joint(s) "
+            f"but robot {robot.name!r} has {robot.n_joints}")
+
+    from kinescore.backbones.dino import FeatureBackbone
+    from kinescore.readers.squashed import SquashedPoseReader
+
+    backbone_cfg = dict(loaded.cfg.get("backbone", {}))
+    backbone_cfg.setdefault("embed_dim", loaded.embed_dim)
+    bb = backbone or FeatureBackbone(view_layout=view_layout,
+                                     **backbone_cfg).to(device).eval()
+    rid = reader_id or (f"attentive/{backbone_cfg.get('dino_model', 'unknown')}/"
+                        f"{view_layout.key}/{path}")
+    return SquashedPoseReader(
+        backbone=bb, head=loaded.head, q_lo=robot.q_lo, q_hi=robot.q_hi,
+        view_layout=view_layout, robot_name=robot.name, reader_id=rid)

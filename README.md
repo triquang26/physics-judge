@@ -41,12 +41,17 @@ kinescore aggregate out/ && kinescore report out/
 
 ## Supported robots
 
-| Robot | DOF | Cameras | Balance | Notes |
-|---|---|---|---|---|
-| Franka Panda | 7 + gripper | 1 or 3 (multiview) | n/a — bolted down | DROID-style exterior + wrist views |
-| Fourier GR-1 | 17 + 12 hand | 1 ego-view | yes — feet, CoM margin | bimanual humanoid |
+| Robot | DOF | Cameras | Balance | Pose reader | `limit_semantics` | Notes |
+|---|---|---|---|---|---|---|
+| Franka Panda | 7 + gripper | 1 or 3 (multiview) | n/a — bolted down | `AttentivePoseHead` → `SquashedPoseReader` | `squashed` | DROID-style exterior + wrist views |
+| Fourier GR-1 | 17 + 12 hand | 1 ego-view | yes — feet, CoM margin | `ReadoutV2Head` → `HeteroscedasticPoseReader` (the production/page path) | `raw_rad` | bimanual humanoid |
 
-Adding a third is implementing one protocol: see [`docs/ADDING_A_ROBOT.md`](docs/ADDING_A_ROBOT.md).
+The two robots use two **different** reader families on purpose, not a
+default-plus-exception: Franka's squashed head is valid-by-construction (see
+below), GR-1's heteroscedastic head is not, and `--reader` auto-routes to the
+matching one from the checkpoint itself (`kinescore.readers.checkpoint.load_reader`)
+— see [`docs/PROVENANCE.md`](docs/PROVENANCE.md) D10. Adding a third robot is
+implementing one protocol: see [`docs/ADDING_A_ROBOT.md`](docs/ADDING_A_ROBOT.md).
 
 ## What each metric does *not* detect
 
@@ -58,7 +63,7 @@ number:
 |---|---|---|
 | Rigidity residual / wobble | link lengths staying constant | anything about *speed*; and under the full bone set it is contaminated by gripper actuation (see D9) |
 | Mean jerk | motion smoothness | a smoothly-executed but impossible motion |
-| Joint-limit violation | joints driven past their stops | **nothing at all under a squashed-head reader** — it is structurally `0` (see D7), and kinescore reports `null`, never `0` |
+| Joint-limit violation | joints driven past their stops | **nothing at all under a squashed-head reader** (Franka) — it is structurally `0` (see D7), and kinescore reports `null`, never `0`. **Observable** under a `raw_rad` reader (GR-1) — the clamp overshoot on the unsquashed reading *is* the signal |
 | Accel violation fraction | accelerations over a fixed bound | it uses an *absolute* threshold, so it is the metric most sensitive to a wrong frame rate |
 | Effort proxy | rough torque demand | real torque — there is no inertia model; comparative only |
 | PIS | aggregate deviation from real motion | comparability across different suites — only valid within one `suite_id` |

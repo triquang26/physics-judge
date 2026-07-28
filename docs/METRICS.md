@@ -266,8 +266,12 @@ Joint-limit feasibility. Retargeted at `q_raw`, not `q` — see
   **structurally `0`** by construction of the head, not by anything about the
   video (the whole of defect D7). kinescore reports this as `null`
   (`NaN` + `"unobservable:limit_semantics=squashed"`), **never `0`**, for
-  every squashed-head reader — which is every real production checkpoint
-  today (`judge_v3l`, `judge_v3l_mv`, `judge_reward`).
+  every squashed-head reader — every real Franka checkpoint
+  (`judge_v3l`, `judge_v3l_mv`, `judge_reward`). This metric **is**
+  observable for the GR-1 production checkpoint (`readout_v2_gr1.pt`,
+  `ReadoutV2Head` → `HeteroscedasticPoseReader`, `limit_semantics="raw_rad"`)
+  — squashed vs. raw_rad is a per-robot, per-head-family property, not a
+  package-wide default; see [PROVENANCE.md](PROVENANCE.md#d10--readoutv2head-had-no-checkpoint-loader--cli-wiring-prioritization-correction).
 
 ### `limit_excess_rad`
 

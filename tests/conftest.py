@@ -42,6 +42,13 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 #: skip with an actionable message rather than erroring on a missing path.
 CKPT_ROOT_ENV = "KINESCORE_CIASC_ROOT"
 
+#: Env var pointing at a Marionette-fkjepa checkout -- a DIFFERENT source
+#: repo from CKPT_ROOT_ENV's Marionette-ciasc (see docs/PROVENANCE.md's A/B
+#: split). This is where the GR-1 ReadoutV2Head production checkpoint lives
+#: (`model_ckpt/readout_v2_gr1.pt`), so `ckpt`-marked tests that need it
+#: (tests/test_checkpoint_v2_real_ckpt.py) probe this instead.
+FKJEPA_ROOT_ENV = "KINESCORE_FKJEPA_ROOT"
+
 
 # ===========================================================================
 # assert_close_dict
@@ -225,11 +232,26 @@ def _ckpt_root() -> Path | None:
     return Path(root) if root else None
 
 
+def _fkjepa_root() -> Path | None:
+    root = os.environ.get(FKJEPA_ROOT_ENV)
+    return Path(root) if root else None
+
+
 def _ckpt_available() -> bool:
-    root = _ckpt_root()
-    if root is None or not root.is_dir():
-        return False
-    return any(root.glob("model_ckpt/*/judge.pt"))
+    """``True`` if EITHER real-checkpoint source tree is reachable.
+
+    Two independent checkpoint families live under two independent env
+    vars (see ``CKPT_ROOT_ENV``/``FKJEPA_ROOT_ENV`` above) -- a host with
+    only one checked out should still run the `ckpt`-marked tests that
+    apply to it, so this is an OR, not a requirement that both be present.
+    """
+    ciasc = _ckpt_root()
+    has_ciasc = (ciasc is not None and ciasc.is_dir()
+                and any(ciasc.glob("model_ckpt/*/judge.pt")))
+    fkjepa = _fkjepa_root()
+    has_fkjepa = (fkjepa is not None and fkjepa.is_dir()
+                 and (fkjepa / "model_ckpt" / "readout_v2_gr1.pt").is_file())
+    return has_ciasc or has_fkjepa
 
 
 def _ffmpeg_available() -> bool:

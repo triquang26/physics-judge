@@ -1,5 +1,23 @@
 """Per-DoF query attention + observability gate, and the FK-free keypoint path.
 
+LEGACY -- not on any wired path
+--------------------------------
+This head is ported and kept for provenance / possible future use, but it is
+**not** part of either of kinescore's two live pose-reader paths:
+
+* Franka (multiview DROID judge) -> :class:`~kinescore.heads.attentive.AttentivePoseHead`
+  -> :class:`~kinescore.readers.squashed.SquashedPoseReader`.
+* GR-1 (the production/page path) -> :class:`~kinescore.heads.heteroscedastic.ReadoutV2Head`
+  -> :class:`~kinescore.readers.heteroscedastic.HeteroscedasticPoseReader` /
+  :class:`~kinescore.readers.checkpoint_v2.ReadoutV2PoseReader`.
+
+There is no checkpoint loader or reader composition for
+:class:`DisentangledPoseHead` in ``readers/`` -- constructing one is the
+caller's own responsibility, and none of ``cli/``, ``training/`` import this
+module on a default (no-flag) code path. See ``docs/PROVENANCE.md`` for the
+correction that made ReadoutV2 first-class and this head explicitly
+secondary.
+
 Ported **verbatim** (module math unchanged) from
 ``models.evaluation.pixel_judge_gr1.DisentangledPoseHead``. Not adapted for
 this delivery: the GR-1-specific gamma-prior construction (kinematic-depth

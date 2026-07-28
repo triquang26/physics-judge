@@ -127,46 +127,35 @@ def apply_resolved_timebase(rows: list[dict], *, fps: float | None,
 def build_scorer(args: argparse.Namespace, view_layout):
     """Compose robot + checkpoint reader + suite into a :class:`~kinescore.core.scorer.Scorer`.
 
-    Only the checkpoint format ``kinescore.readers.checkpoint`` actually
-    loads is wired up here -- the squashed :class:`AttentivePoseHead` family
-    (``judge_v3l``/``judge_v3l_mv``/``judge_reward`` and anything saved by
-    ``kinescore.readers.checkpoint.save``). A ``raw_rad``/heteroscedastic
-    checkpoint has no equivalent on-disk loader in this package yet (see that
-    module's docstring); composing a
-    :class:`~kinescore.readers.heteroscedastic.HeteroscedasticPoseReader` by
-    hand from a ``ReadoutV2Head`` you loaded yourself is the current path for
-    that family, not this CLI.
+    ``--reader`` auto-routes via :func:`kinescore.readers.checkpoint.load_reader`,
+    which inspects the checkpoint's ``cfg`` dict (no model construction yet)
+    and picks the matching family:
+
+    * an :class:`~kinescore.heads.attentive.AttentivePoseHead` cfg
+      (``judge_v3l``/``judge_v3l_mv``/``judge_reward``, or anything saved by
+      ``kinescore.readers.checkpoint.save``) -> a
+      :class:`~kinescore.readers.squashed.SquashedPoseReader`.
+    * a :class:`~kinescore.heads.heteroscedastic.ReadoutV2Head` cfg (the GR-1
+      production checkpoint, ``readout_v2_gr1.pt``) -> a
+      :class:`~kinescore.readers.checkpoint_v2.ReadoutV2PoseReader` (sigma
+      calibration + the FK/aux dimension split -- see that module's
+      docstring for why GR-1's 29-dim head output cannot feed
+      ``GR1Spec.forward_transforms`` directly).
+
+    Both branches return a ready-to-score
+    :class:`~kinescore.core.reader.PoseReader`; this function no longer needs
+    to know which family a checkpoint is. See
+    ``readers/checkpoint.py::load_reader``'s own docstring for the routing
+    rule itself.
     """
-    from kinescore.backbones.dino import FeatureBackbone
     from kinescore.cli._suites import get_suite
     from kinescore.core.scorer import Scorer
     from kinescore.readers import checkpoint as ckpt_mod
-    from kinescore.readers.squashed import SquashedPoseReader
     from kinescore.robots import get_robot
 
     robot = get_robot(args.robot, device=args.device)
-    loaded = ckpt_mod.load(args.reader, device=args.device)
-    if loaded.limit_semantics != "squashed":
-        raise NotImplementedError(
-            f"reader checkpoint {args.reader!r} declares limit_semantics="
-            f"{loaded.limit_semantics!r}; this CLI only wires up the "
-            f"squashed AttentivePoseHead reader (kinescore.readers.checkpoint "
-            f"only loads that head family) -- see this function's docstring.")
-    if loaded.n_joints != robot.n_joints:
-        raise ValueError(
-            f"checkpoint {args.reader!r} was trained for {loaded.n_joints} "
-            f"joint(s) but robot {args.robot!r} has {robot.n_joints}")
-
-    backbone_cfg = dict(loaded.cfg.get("backbone", {}))
-    backbone_cfg.setdefault("embed_dim", loaded.embed_dim)
-    backbone = FeatureBackbone(view_layout=view_layout, **backbone_cfg)
-    backbone = backbone.to(args.device).eval()
-
-    reader = SquashedPoseReader(
-        backbone=backbone, head=loaded.head, q_lo=robot.q_lo, q_hi=robot.q_hi,
-        view_layout=view_layout, robot_name=robot.name,
-        reader_id=f"attentive/{backbone_cfg.get('dino_model', 'unknown')}"
-                  f"/{view_layout.key}/{args.reader}")
+    reader = ckpt_mod.load_reader(args.reader, robot=robot, view_layout=view_layout,
+                                  device=args.device)
 
     suite = get_suite(args.suite)
     return Scorer(robot=robot, reader=reader, suite=suite)

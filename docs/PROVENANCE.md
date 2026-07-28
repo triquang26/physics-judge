@@ -546,6 +546,76 @@ label. It lives in `bench/manifest.py` and `video/probe.py`.
   (which bones to include), not a persisted file format; `bone_set="all"`
   reproduces legacy numbers exactly for any FK output, old or new.
 
+### D10 — ReadoutV2Head had no checkpoint loader / CLI wiring (prioritization correction)
+
+- **Was.** kinescore has **two** legitimate pose-reader paths, one per robot:
+  Franka (multiview DROID judge) -> `AttentivePoseHead` -> `SquashedPoseReader`,
+  and GR-1 (the family the public kinescore page actually runs) ->
+  `ReadoutV2Head` -> `HeteroscedasticPoseReader`. The GR-1 head's math was
+  already correctly ported (`src/kinescore/heads/heteroscedastic.py`,
+  `readers/heteroscedastic.py`, `readers/ensemble.py` all pre-date this
+  entry), but **only the Franka path had a checkpoint-to-reader loader and
+  CLI wiring** -- `cli/_scoring.py::build_scorer` raised
+  `NotImplementedError` for any checkpoint whose cfg declared
+  `limit_semantics != "squashed"`. That made the *secondary* path (Franka)
+  the only one runnable from the CLI, while the path the production page
+  actually serves (GR-1 / ReadoutV2) had no on-disk loader at all -- a
+  prioritization error, not a math error.
+- **Is.** `src/kinescore/readers/checkpoint_v2.py` is the ReadoutV2 loader,
+  mirroring `readers/checkpoint.py`'s structure (cfg -> constructor kwargs ->
+  `load_state_dict(strict=True)`), plus two things a bare
+  `ReadoutV2Head(**cfg)` would miss: **sigma calibration**
+  (`resolve_sigma_scale`, mirroring `ReadoutV2Scorer._resolve_sigma_scale`'s
+  precedence -- explicit override > `meta["sigma_scale"]` > `1.0`; the real
+  `readout_v2_gr1.pt` carries `sigma_scale=1.9375`) and the **FK/aux
+  dimension split** (`ReadoutV2PoseReader`): GR-1's head predicts 29 dims
+  (17 FK joints + 12 hand DoF) but `GR1Spec.n_joints == 17`, so the trailing
+  dims are routed into `Readout.aux["hand"]` instead of being handed to FK,
+  mirroring `ReadoutV2Scorer.score_feat`'s own `ReadoutV2Head.split`-before-
+  `clamp_for_fk` ordering. `readers/checkpoint.py::load_reader` is the single
+  public entry point that auto-routes a `.pt` file to the right loader by cfg
+  shape (`readers/checkpoint_v2.py::is_readout_v2_cfg`); `cli/_scoring.py
+  ::build_scorer` now calls only that function -- it no longer needs to know
+  which head family a `--reader` path is.
+  `readers/ensemble.py::EnsemblePoseReader.from_checkpoint` supports the
+  matching ensemble-bundle format (`{"heads": [...], "cfg", "meta"}`, no
+  real bundle exists on disk yet -- only `readout_v2_gr1.pt`, single-head);
+  `K=1` degrades to a plain `ReadoutV2PoseReader` (not an `EnsemblePoseReader`
+  wrapping one member) specifically so `Readout.extras` has no
+  `"epistemic"` key at all in that case, rather than the internal
+  `variance_decompose` convention of a real (but degenerate, and therefore
+  potentially misread as "measured and found zero") `0`.
+- **Why.** `docs/PROVENANCE.md` and `README.md` previously read as if the
+  squashed head were kinescore's one canonical reader, when the two are
+  correctly per-robot: Franka is squashed, GR-1 is heteroscedastic/raw_rad,
+  and only the raw_rad path makes `limit_violation_frac`/`limit_excess_rad`
+  observable at all (D7). Shipping CLI wiring for only the secondary path
+  would have made the primary (page) path unusable outside a hand-written
+  script.
+- **Test that pins it.** `tests/test_checkpoint_v2.py` (cfg detection, save/
+  load round-trip, sigma calibration, the FK/aux split, the unified
+  `load_reader` auto-routing), `tests/test_readout_v2_cli_wiring.py`
+  (`build_scorer` end-to-end for both families, real Panda URDF), and
+  `@pytest.mark.ckpt`-gated `tests/test_checkpoint_v2_real_ckpt.py`, which
+  loads the real `readout_v2_gr1.pt` with `strict=True` and reproduces the
+  source `ReadoutV2Scorer`'s `mu`/`sigma` on a fixed random feature input to
+  `atol=1e-4` (skipped unless `$KINESCORE_FKJEPA_ROOT` is set).
+- **Do old artifacts still load?** N/A -- no checkpoint format changed; this
+  closes a missing-loader gap, not a format defect. The real
+  `readout_v2_gr1.pt` (source format, predates this package's
+  `robot_name`/`view_layout_key` convention entirely) loads unmodified;
+  `readers/checkpoint_v2.py::load_head` defaults `robot_name` to
+  `"fourier_gr1"` for exactly this reason (every real checkpoint at this
+  head family targets GR-1; there is no other target in source or port).
+- **The other two ported heads stay legacy, explicitly.**
+  `src/kinescore/heads/disentangled.py::DisentangledPoseHead` and
+  `src/kinescore/heads/mlp.py::DinoPoseHead` are ported (see (a3)'s table for
+  the former, (a1)#3 for the latter) but are **not** on either wired path --
+  no checkpoint loader, no reader composition, no CLI/`readers/`/`training/`
+  import of either on a default code path. Both modules now carry an
+  explicit "LEGACY -- not on any wired path" docstring banner saying so, kept
+  for provenance and possible future use rather than deleted.
+
 ## (c) Not ported, and why
 
 - **Source D** (`Marionette/models/evaluation/`) — considered and rejected:

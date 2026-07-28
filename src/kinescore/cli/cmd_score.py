@@ -66,6 +66,12 @@ def run(args: argparse.Namespace) -> int:
         raise
 
     scorer = build_scorer(args, view_layout)
+    if scorer.reader.limit_semantics == "raw_rad":
+        print(f"[score] reader {scorer.reader.reader_id!r} is raw_rad: "
+              f"limit_violation_frac/limit_excess_rad are OBSERVABLE for this "
+              f"run (see docs/PROVENANCE.md D7). No sigma-gate is applied by "
+              f"this command -- every frame is scored; pass a `gate=` to "
+              f"kinescore.core.scorer.Scorer yourself for a gated run.")
 
     results_path = os.path.join(args.out, "results.jsonl")
 

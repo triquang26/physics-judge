@@ -12,7 +12,8 @@ model_ckpt/
 *.mp4
 *.parquet
 *.npz
-!tests/golden/*.npz          # golden fixtures ARE tracked; budget < 4 MB, enforced by test
+# golden fixtures ARE tracked; budget < 4 MB, enforced by test
+!tests/golden/*.npz
 
 # Environments and caches
 .venv/
