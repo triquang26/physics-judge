@@ -48,7 +48,11 @@ FORBIDDEN_PATH_RE = re.compile(
 PATH_EXEMPT = {".env.example"}
 PATH_EXEMPT_DIRS = {"provenance", "docs"}
 
-TEXT_SUFFIXES = {".py", ".toml", ".cfg", ".ini", ".txt", ".yaml", ".yml", ".sh"}
+#: ``.json`` is included because machine-generated manifests are exactly where an
+#: absolute host path slips through unnoticed -- tests/golden/MANIFEST.json carried
+#: the developer's ``$HOME`` and workspace root all the way to the first public push
+#: without this check ever looking at it.
+TEXT_SUFFIXES = {".py", ".toml", ".cfg", ".ini", ".txt", ".yaml", ".yml", ".sh", ".json"}
 
 
 def _iter_files(repo: Path):

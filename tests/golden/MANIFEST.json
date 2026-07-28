@@ -1,8 +1,8 @@
 {
   "generated_at": "2026-07-26T02:05:58+0700",
   "generator_sha256": "078891d89d05d0c8b1b9acee21e585919980f84539a10b6a34ef87900ffc02d0",
-  "source_a": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-ciasc",
-  "source_b": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-fkjepa",
+  "source_a": "<WORKSPACE>/Marionette-ciasc",
+  "source_b": "<WORKSPACE>/Marionette-fkjepa",
   "versions": {
     "python": "3.10.12",
     "torch": "2.7.1",
@@ -132,7 +132,7 @@
       "rng_seeds": "torch.Generator().manual_seed(0) per checkpoint"
     }
   },
-  "panda_urdf_path": "/home/hunght23/.cache/robot_descriptions/example-robot-data/robots/panda_description/urdf/panda.urdf",
+  "panda_urdf_path": "<HOME>/.cache/robot_descriptions/example-robot-data/robots/panda_description/urdf/panda.urdf",
   "panda_urdf_sha256": "63792d2679f22c4e41cda2c4d9d903644e628970ad0656b9eec8485113941555",
   "wall_time_s": 9.77,
   "total_bytes": 856237,

@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-07-25T19:59:46.618444+00:00",
   "ciasc_A": {
-    "root": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-ciasc",
+    "root": "<WORKSPACE>/Marionette-ciasc",
     "head": "13b97e38cb40eefd7f91315c2eeba06b3ae6acb3",
     "is_dirty": true,
     "dirty_files": [
@@ -45,8 +45,8 @@
     "note": "is_dirty=True means HEAD does not describe the files on disk. The SHA-256 in sources.sha256 is what was actually read; HEAD is context only."
   },
   "fkjepa_B": {
-    "root": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-fkjepa",
-    "git_marker_path": "/mnt/data/sftp/data/hunght23/quangpt3_data/marionette-workspace/Marionette-fkjepa/.git",
+    "root": "<WORKSPACE>/Marionette-fkjepa",
+    "git_marker_path": "<WORKSPACE>/Marionette-fkjepa/.git",
     "has_citable_commit": false,
     "pointer_text": "gitdir: /mnt/data/sftp/data/quangpt3/marionette-workspace/Marionette/.git/worktrees/Marionette-fkjepa",
     "pointer_target_exists": false,
