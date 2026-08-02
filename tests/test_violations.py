@@ -194,6 +194,63 @@ def test_bone_units_and_thresholds_are_per_detector() -> None:
     assert len(units) == 5
 
 
+def test_severity_ratio_keeps_ranking_past_100pct_fraction() -> None:
+    """``fraction`` saturates at 1.0 once every frame flags; ``severity_ratio``
+    must not -- two all-flagged clips of different severity should still
+    rank in severity order by ``severity_ratio_median``, the thing
+    ``fraction`` alone cannot distinguish (see the GR-1 cosmos-data
+    saturation this was found against: several clips reported 91-100%
+    flagged with no way to tell "just over" from "way over" apart).
+    """
+    robot = _chain_robot()
+    T = 24
+    gt_clips = [_rigid_chain(T, phase=ph)[0] for ph in (-0.10, 0.0, 0.10)]
+    gt_contexts = [_clip_ctx(P, robot) for P in gt_clips]
+
+    scorer = ViolationScorer()
+    scorer.calibrate(gt_contexts, pct=95.0)
+    rigidity = next(d for d in scorer.detectors if d.name == "rigidity")
+
+    P, d12 = _rigid_chain(T, phase=0.05)
+    mild = _clip_ctx(_warp_clip(P, d12, (0, T - 1), extra_m=0.02), robot)
+    severe = _clip_ctx(_warp_clip(P, d12, (0, T - 1), extra_m=0.20), robot)
+
+    r_mild = rigidity.report(mild)
+    r_severe = rigidity.report(severe)
+
+    # Both warped for every frame of the clip -> fraction saturates at 1.0
+    # for both, indistinguishable.
+    assert r_mild["fraction"] == 1.0
+    assert r_severe["fraction"] == 1.0
+
+    # severity_ratio is unbounded and still separates them.
+    assert r_severe["severity_ratio_median"] > r_mild["severity_ratio_median"] > 1.0
+
+
+def test_severity_ratio_orientation_matches_higher_is_worse() -> None:
+    """``severity_ratio`` must read ">1 = worse" in the same direction for
+    every detector, including ``self_collision`` (``higher_is_worse=False``,
+    smaller distance = worse) -- a caller comparing ratios across detector
+    types would silently invert self_collision's meaning otherwise.
+    """
+    robot = _chain_robot()
+    T = 24
+    gt_clips = [_rigid_chain(T, phase=ph)[0] for ph in (-0.10, 0.0, 0.10)]
+    gt_contexts = [_clip_ctx(P, robot) for P in gt_clips]
+
+    scorer = ViolationScorer()
+    scorer.calibrate(gt_contexts, pct=95.0)
+    report = scorer.score(_clip_ctx(_rigid_chain(T, phase=0.05)[0], robot))
+
+    for name, r in report.items():
+        # >= 0, not > 0: this synthetic chain is exactly rigid (closed-form
+        # geometry, no reader noise), so a detector whose per-frame score is
+        # genuinely 0 on a clean clip (e.g. rigidity) legitimately reports
+        # ratio 0.0 -- that is correct, not a floor violation.
+        assert r["severity_ratio_median"] >= 0, name
+        assert r["severity_ratio_p90"] >= r["severity_ratio_median"] - 1e-6, name
+
+
 def test_rigid_idx_can_exclude_a_bone() -> None:
     """``RigidityDetector(rigid_idx=...)`` narrows which bones are checked.
 

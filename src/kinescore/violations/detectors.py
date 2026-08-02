@@ -139,14 +139,32 @@ class Detector:
         return out
 
     def report(self, ctx: MetricContext) -> dict:
-        """Score one clip: threshold, flagged fraction, and this detector's own intervals."""
+        """Score one clip: threshold, flagged fraction, severity, and this detector's own intervals.
+
+        ``fraction`` (flagged-frame %) saturates at 100% once nearly every
+        frame in a clip crosses ``threshold`` -- past that point it cannot
+        distinguish "barely over" from "catastrophically over", which is
+        exactly the frames a clip's worst case needs to rank correctly.
+        ``severity_ratio`` fixes this: ``per_frame / threshold`` (inverted to
+        ``threshold / per_frame`` when ``higher_is_worse`` is ``False``, so
+        ``>1`` always means "worse than the calibration boundary" regardless
+        of direction), reduced over the clip by median and p90. It has no
+        ceiling, so two clips that both flag 100% of frames can still be
+        told apart, and because it is threshold-relative rather than raw
+        ``units``, it is comparable across detectors with different units
+        (mm vs deg vs mm/frame^3) -- e.g. ``max`` across detectors is a
+        reasonable single per-clip "worst violation" scalar.
+        """
         s = self.per_frame(ctx)
         flag = self._flag(s)
+        ratio = (s / self.threshold) if self.higher_is_worse else (self.threshold / np.maximum(s, 1e-9))
         return {
             "units": self.units,
             "threshold": round(float(self.threshold), 2),
             "fraction": round(float(flag.mean()), 3),
             "n_flagged": int(flag.sum()),
+            "severity_ratio_median": round(float(np.median(ratio)), 3),
+            "severity_ratio_p90": round(float(np.percentile(ratio, 90)), 3),
             "intervals": self._intervals(flag),           # <-- per-type interval list
             "per_frame": [round(float(x), 1) for x in s],
         }
