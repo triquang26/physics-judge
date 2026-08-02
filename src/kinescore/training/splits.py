@@ -35,7 +35,7 @@ model's apparent val performance for exactly the reason a stratified split
 exists to prevent. See :func:`default_scene_key` for how the key is derived
 when the caller doesn't supply one, and its own docstring for what happens
 when the episode id genuinely carries no scene signal (DROID's plain integer
-ids, e.g. ``"0"``, ``"1"``, ``"100"`` -- see ``legacy_docs/DATA_LAYOUT.md``).
+ids, e.g. ``"0"``, ``"1"``, ``"100"`` -- see ``docs/DATA_PREP.md``).
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def default_scene_key(episode_id: str) -> str:
     ``"close_cardboard_box"``).
 
     A **purely numeric** episode id (DROID's own convention -- plain
-    integers like ``"0"``, ``"1"``, ``"100"``, see ``legacy_docs/DATA_LAYOUT.md``)
+    integers like ``"0"``, ``"1"``, ``"100"``, see ``docs/DATA_PREP.md``)
     strips to an empty string; falling through to that empty key would
     silently collapse every episode in the pool into ONE scene, which
     defeats stratification in the opposite direction (a val set that is

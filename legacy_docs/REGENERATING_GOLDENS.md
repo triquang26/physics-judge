@@ -113,7 +113,7 @@ generated against — cross-referenced against, but not a replacement for,
 `robot-descriptions`) — **a torch/numpy upgrade can shift bit-level results
 even when arithmetic is unchanged**, so `versions` is what tells a future
 reader whether an observed drift is a real regression or an environment
-artifact (see [MODIFYING.md](MODIFYING.md)'s "upgrade torch" row).
+artifact.
 
 ## `tools/gen_golden.py --diff`
 
