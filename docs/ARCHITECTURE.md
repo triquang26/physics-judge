@@ -116,13 +116,9 @@ per-arm chains: `keypoint_links = KEYPOINTS_LEFT + KEYPOINTS_RIGHT`,
    [DATA_PREP.md](DATA_PREP.md)) and to a `configs/*.yaml` benchmark config's
    `axes.robot` + `robots:` reader-pin table.
 
-The full walkthrough this section summarizes (keypoint ordering diagrams,
-`ee_sites()` conventions, the exact `Synthetic2R`/`GR1Spec` code comparison)
-is preserved at
-[legacy_docs/ADDING_A_ROBOT.md](../legacy_docs/ADDING_A_ROBOT.md) — the
-registration mechanics there predate `core/registry.py::Registry` (it
-describes a hand-rolled `_FACTORIES` dict), but the per-robot checklist items
-(D9, capability declarations, keypoint ordering) are unchanged.
+Registration goes through `core/registry.py::Registry`; the per-robot
+checklist items (D9 rigid-bone exclusion, capability declarations, keypoint
+ordering) are the parts that actually matter and are unchanged.
 
 ## `readers/` and `heads/` — one reader family
 
@@ -203,10 +199,6 @@ refusal to pool mismatched `suite_id`s without `--allow-mixed-suites`.
    default. **Never add to `INVARIANT_V1`** — that suite is frozen (its
    `suite_id` is what every prior published number was computed under);
    `ALL_METRICS` is the suite new metrics join.
-
-Full walkthrough (the exact `MetricValue`/`MetricContext` field-by-field
-contract, worked examples) is preserved at
-[legacy_docs/ADDING_A_METRIC.md](../legacy_docs/ADDING_A_METRIC.md).
 
 ## `bench/` — the benchmark matrix
 

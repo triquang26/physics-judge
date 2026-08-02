@@ -230,9 +230,7 @@ rates for a *different* reason (thresholding a `dt`-dependent quantity
 against a fixed physical constant, or summing terms with different
 exponents): `accel_violation_frac`, `vel_violation_frac`, `no_teleport_frac`,
 `total_energy_tstd`, `sparc`, `torque_frac_rated`. Full reasoning per metric
-in [METRICS.md](METRICS.md); the exhaustive frame-rate investigation this
-section summarises is preserved at
-[legacy_docs/RATE_POLICY.md](../legacy_docs/RATE_POLICY.md).
+in [METRICS.md](METRICS.md).
 
 ## CSV export and per-clip ranking
 

@@ -976,7 +976,7 @@ where it *is* true, unverifiable without a mechanical check. Instead:
   inside the relevant test file (e.g. `test_franka_reproduces_measured_15_37mm`),
   not against `--diff`'s legacy-vs-new table, which only checks
   currently-registered adapters (`_DIFF_ADAPTERS` is empty as shipped in this
-  script — see [REGENERATING_GOLDENS.md](REGENERATING_GOLDENS.md)).
+  script).
 - **Everything else differs exactly as enumerated in (b) and (a1)'s
   per-file notes** — restructured into `MetricSpec`/`RobotSpec`/`PoseReader`
   classes, retargeted at `q_raw`, given a default `bone_set="rigid"`, given a

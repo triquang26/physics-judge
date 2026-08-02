@@ -5,9 +5,9 @@ repositories, and each is recorded here with the measurement that settled it.
 A decision without its evidence is an opinion; a decision with its evidence can
 be re-argued when the data changes.
 
-This is the "why" companion to [RATE_POLICY.md](RATE_POLICY.md) (how frame
-rate is handled), [METRICS.md](METRICS.md) (what each ruler measures) and
-[PROVENANCE.md](PROVENANCE.md) (what was ported and what was fixed).
+This is the "why" companion to [PROVENANCE.md](PROVENANCE.md) (what was
+ported and what was fixed); the frame-rate rules live in
+[../docs/BENCHMARKING.md](../docs/BENCHMARKING.md).
 
 ---
 

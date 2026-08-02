@@ -142,8 +142,8 @@ about **2 MB**.
 ## Reference
 
 - `legacy_docs/DECISIONS.md` — every design choice with the measurement that settled it
-- `legacy_docs/RATE_POLICY.md` — the four frame-rate layers and why
 - `legacy_docs/PROVENANCE.md` — what was ported, and defects D1-D12
+- `docs/BENCHMARKING.md` — the frame-rate rules that make a comparison valid
 - `docs/{DATA_PREP,TRAINING,BENCHMARKING,ARCHITECTURE,METRICS}.md` — the current, maintained docs; read these first
 - `configs/benchmark.yaml` — the reproducibility contract for a run
 

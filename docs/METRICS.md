@@ -22,13 +22,12 @@ pre-port numbers, see D9; the latter two are `ALL_METRICS`-only, see D-E,
 to avoid mutating `INVARIANT_V1`'s frozen `suite_id`); 10 of the 26
 additionally form the PIS (`invariant_keys`) — see
 [ARCHITECTURE.md](ARCHITECTURE.md#adding-a-metric) for what changing that set
-costs (the original walkthrough is preserved at
-[legacy_docs/ADDING_A_METRIC.md](../legacy_docs/ADDING_A_METRIC.md)).
+costs.
 
 `src/kinescore/metrics/suites.py::RATE_FREE` is a second suite holding the
 **9** metrics with `dt_exponent == 0`, derived from the registry rather than
 listed by hand. It is the only suite valid for comparing clips recorded at
-different frame rates — see [RATE_POLICY.md](../legacy_docs/RATE_POLICY.md).
+different frame rates.
 
 Legend: **PIS** = in `INVARIANT_V1.invariant_keys` (the Physical Invariance
 Score's fixed term set). **perframe** = also emits a per-frame array for
