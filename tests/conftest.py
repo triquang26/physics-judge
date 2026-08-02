@@ -43,7 +43,7 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 CKPT_ROOT_ENV = "KINESCORE_CIASC_ROOT"
 
 #: Env var pointing at a Marionette-fkjepa checkout -- a DIFFERENT source
-#: repo from CKPT_ROOT_ENV's Marionette-ciasc (see docs/PROVENANCE.md's A/B
+#: repo from CKPT_ROOT_ENV's Marionette-ciasc (see legacy_docs/PROVENANCE.md's A/B
 #: split). This is where the GR-1 ReadoutV2Head production checkpoint lives
 #: (`model_ckpt/readout_v2_gr1.pt`), so `ckpt`-marked tests that need it
 #: (tests/test_checkpoint_v2_real_ckpt.py) probe this instead.

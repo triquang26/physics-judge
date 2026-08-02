@@ -1,15 +1,16 @@
 """Multiview token-count guard (defect D4).
 
 The source's only guard was ``N % n_cams != 0``, and it lived *inside* the
-``if n_cams > 1`` branch of ``AttentivePoseHead.forward`` -- so a checkpoint
-trained with ``n_cams=1`` had *no* guard at all, and would silently accept a
-147-token 3-camera feature grid (``147 % 1 == 0``) for its entire training
-run. These tests exercise both ``ViewEmbedding`` (the new, standalone,
-unconditional guard -- see ``heads/views.py``) and
-``AttentivePoseHead`` itself (which gets the same fix a different way, via an
-internal ``ViewLayout`` asserted before the ``n_cams > 1`` branch -- see
-``heads/attentive.py``), in both directions: a too-few-tokens and a
-too-many-tokens mismatch.
+``if n_cams > 1`` branch of the (since-removed) ``AttentivePoseHead.forward``
+-- so a checkpoint trained with ``n_cams=1`` had *no* guard at all, and would
+silently accept a 147-token 3-camera feature grid (``147 % 1 == 0``) for its
+entire training run. ``ViewEmbedding`` (see ``heads/views.py``) is the
+standalone, unconditional fix: the bias is always constructed (zero-init) and
+validated against a full ``ViewLayout``, in both directions -- a too-few-
+tokens and a too-many-tokens mismatch. ``ViewEmbedding`` is what
+``readers/heteroscedastic.py`` composes in front of
+:class:`~kinescore.heads.heteroscedastic.ReadoutV2Head`, the one live head
+family, to gain multiview support (that head has none natively).
 """
 from __future__ import annotations
 
@@ -17,7 +18,6 @@ import pytest
 import torch
 
 from kinescore.core.clip import ViewLayout
-from kinescore.heads.attentive import AttentivePoseHead
 from kinescore.heads.views import ViewEmbedding
 
 D = 16  # tiny embed width, CPU-fast
@@ -59,46 +59,6 @@ def test_view_embedding_multiview_bias_is_zero_only_at_init():
         ve.cam_emb.add_(1.0)
     out_after = ve(tokens)
     assert not torch.equal(out_after, tokens)
-
-
-def test_attentive_head_3view_fed_49_tokens_raises():
-    head = AttentivePoseHead(in_dim=D, hidden=8, n_joints=4, n_heads=2,
-                             n_cams=3, tokens_per_view=49)
-    feat = torch.randn(1, 2, 49, D)  # only one view's worth, expected 147
-    with pytest.raises(ValueError):
-        head(feat)
-
-
-def test_attentive_head_1view_fed_147_tokens_raises():
-    head = AttentivePoseHead(in_dim=D, hidden=8, n_joints=4, n_heads=2,
-                             n_cams=1, tokens_per_view=49)
-    feat = torch.randn(1, 2, 147, D)  # a 3-camera grid fed to a 1-cam head
-    with pytest.raises(ValueError):
-        head(feat)
-
-
-def test_attentive_head_v1_output_bit_identical_with_and_without_zero_cam_emb():
-    """A single-view head has NO cam_emb parameter at all (source-verbatim
-    conditional creation, for checkpoint strict-load compat). Its output for
-    n_cams=1 must therefore already equal what an explicit zero-bias would
-    produce -- i.e. adding a zero ViewEmbedding changes nothing."""
-    torch.manual_seed(0)
-    head = AttentivePoseHead(in_dim=D, hidden=8, n_joints=4, n_heads=2, n_cams=1)
-    head.eval()  # dropout must be off for a deterministic bit-identity check
-    assert not hasattr(head, "cam_emb")
-    feat = torch.randn(2, 3, 11, D)
-    out_direct = head(feat)
-
-    ve = ViewEmbedding(in_dim=D, view_layout=ViewLayout(n_views=1, tokens_per_view=11))
-    out_via_embedding = head(ve(feat))
-    assert torch.equal(out_direct, out_via_embedding)
-
-
-def test_attentive_head_multicam_creates_cam_emb_matching_checkpoint_shape():
-    head = AttentivePoseHead(in_dim=D, hidden=8, n_joints=4, n_heads=2, n_cams=3)
-    assert hasattr(head, "cam_emb")
-    assert tuple(head.cam_emb.shape) == (3, D)
-    assert torch.equal(head.cam_emb, torch.zeros(3, D))  # zero-init
 
 
 def test_view_layout_still_permissive_when_tokens_per_view_unknown():

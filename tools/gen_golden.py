@@ -47,10 +47,14 @@ import importlib
 import json
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:  # torch is imported per-function at runtime; this is for annotations only
+    import torch
 
 __all__ = ["GENERATORS", "generate_all"]
 
@@ -214,8 +218,8 @@ def golden_fk(source_a: Path, source_b: Path) -> tuple[dict, list[str]]:
 # golden_physics.npz
 # --------------------------------------------------------------------------
 
-def _q_archetype(name: str, t: "torch.Tensor", lo: "torch.Tensor",
-                 hi: "torch.Tensor") -> "torch.Tensor":
+def _q_archetype(name: str, t: torch.Tensor, lo: torch.Tensor,
+                 hi: torch.Tensor) -> torch.Tensor:
     """One (T,7) joint trajectory archetype. ``t`` is the real time axis (s)."""
     import torch
     mid = (lo + hi) / 2.0
@@ -398,45 +402,18 @@ def golden_head(source_a: Path, source_b: Path) -> tuple[dict, list[str]]:
 
 
 # --------------------------------------------------------------------------
-# golden_predict_pose.npz
+# golden_predict_pose.npz -- RETIRED
 # --------------------------------------------------------------------------
-
-def golden_predict_pose(source_a: Path, source_b: Path) -> tuple[dict, list[str]]:
-    import torch
-    import torch.nn as nn
-    from judge.pixel_judge import PixelPhysicsJudge
-
-    _seed_everything(0)
-    judge = PixelPhysicsJudge(
-        dino_model="dinov2_vitb14", embed_dim=768, fk_ee_link="panda_link8",
-        n_kp=8, hidden=512, dropout=0.1, pool="attn", n_heads=4, n_cams=1,
-    )
-
-    class _Identity(nn.Module):
-        """Bypass the DINO->head path: feed ``raw`` straight into the sigmoid
-        squash so we control the pre-squash logits exactly, including
-        extremes well past where a trained head would ever land."""
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            return x
-
-    judge.head = _Identity()
-
-    # (1,8,8): last joint-column pair (index 7) is the gripper logit. Sweep
-    # -20..20 sigma-equivalent so both q (sigmoid into joint_limits) and
-    # gripper (plain sigmoid) are checked at saturation, not just mid-range.
-    raw = torch.linspace(-20.0, 20.0, 64, dtype=torch.float32).reshape(1, 8, 8)
-    with torch.no_grad():
-        q, gripper = judge.predict_pose(raw)
-
-    out: dict[str, np.ndarray] = {}
-    _flatten("raw", raw, out)
-    _flatten("q", q, out)
-    _flatten("gripper", gripper, out)
-    _flatten("q_lo", judge.q_lo, out)
-    _flatten("q_hi", judge.q_hi, out)
-
-    return out, ["PixelPhysicsJudge.predict_pose"]
+# This generator used to freeze `PixelPhysicsJudge.predict_pose`'s sigmoid
+# squash (raw -> q = lo + (hi-lo)*sigmoid(raw)) so `tests/test_head_golden.py`
+# could check `kinescore.heads.ranges.squash_to_limits` against it. Both the
+# squash function and the squashed pose-reader it validated
+# (readers/squashed.py::SquashedPoseReader) have been removed from
+# src/kinescore entirely -- see docs/PROVENANCE.md's D7 addendum -- so there
+# is nothing left in this package for the fixture to validate. The generator
+# function and its `tests/golden/golden_predict_pose.npz` output are both
+# retired, not merely unused: re-adding either would resurrect a fixture for
+# code that no longer exists. See git history for the removed implementation.
 
 
 # --------------------------------------------------------------------------
@@ -462,7 +439,7 @@ def golden_reference(source_a: Path, source_b: Path) -> tuple[dict, list[str]]:
         effort_limits=fk.joint_effort_limits,
     )
 
-    def _pose(q: "torch.Tensor"):
+    def _pose(q: torch.Tensor):
         P, R = fk.forward_transforms(q, torch.zeros(1, T, 1))
         res = phys.invariant_residuals(P, q=q, R=R)
         samp = phys.motion_samples(P, q=q, R=R)
@@ -652,7 +629,7 @@ def golden_ckpt_head(source_a: Path, source_b: Path) -> tuple[dict, list[str]]:
     out: dict[str, np.ndarray] = {}
     qualnames = ["AttentivePoseHead.forward"]
 
-    for name, (rel, n_cams, n_tokens) in _CKPTS.items():
+    for name, (rel, _n_cams, n_tokens) in _CKPTS.items():
         ckpt_path = source_a / rel
         if not ckpt_path.is_file():
             raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
@@ -690,7 +667,6 @@ GENERATORS: dict[str, Callable[[Path, Path], tuple[dict, list[str]]]] = {
     "golden_fk": golden_fk,
     "golden_physics": golden_physics,
     "golden_head": golden_head,
-    "golden_predict_pose": golden_predict_pose,
     "golden_reference": golden_reference,
     "golden_gr1_fk": golden_gr1_fk,
     "golden_ckpt_head": golden_ckpt_head,
@@ -707,7 +683,6 @@ FIXTURE_SOURCE_FILES: dict[str, tuple[str, ...]] = {
     "golden_fk": ("A/judge/fk.py",),
     "golden_physics": ("A/judge/fk.py", "A/judge/physics.py"),
     "golden_head": ("A/judge/pixel_judge.py",),
-    "golden_predict_pose": ("A/judge/pixel_judge.py", "A/judge/fk.py"),
     "golden_reference": (
         "A/judge/fk.py", "A/judge/physics.py",
         "B/models/evaluation/motion_reference.py",
@@ -726,8 +701,6 @@ FIXTURE_SEEDS: dict[str, str] = {
     "golden_physics": "torch.manual_seed(0); high_freq_jitter uses "
                        "torch.Generator().manual_seed(0) per (archetype,dt)",
     "golden_head": "torch.manual_seed(0), reseeded before each of the 4 heads",
-    "golden_predict_pose": "torch.manual_seed(0) (raw input is a fixed "
-                            "linspace, not randomly drawn)",
     "golden_reference": "12 real rollouts: torch.Generator().manual_seed(1000+i) "
                          "for i in range(12); 5 test cases: seeds 2000/3000/4000 "
                          "where randomness is used",

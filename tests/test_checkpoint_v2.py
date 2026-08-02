@@ -15,9 +15,7 @@ import torch
 
 from kinescore.core.clip import ViewLayout
 from kinescore.heads.heteroscedastic import ReadoutV2Head
-from kinescore.readers import checkpoint as ckpt_mod
-from kinescore.readers import checkpoint_v2
-from kinescore.readers.ensemble import EnsemblePoseReader
+from kinescore.readers import checkpoint as ckpt_mod, checkpoint_v2
 
 D = 12
 P_TOKENS = 9  # 3x3 patch grid
@@ -83,7 +81,7 @@ class TestIsReadoutV2Cfg:
         assert checkpoint_v2.is_readout_v2_cfg(cfg) is False
 
     def test_false_for_legacy_attentive_cfg(self):
-        # the real judge_v3l-vintage 12-key cfg (see test_checkpoint_legacy_cfg.py)
+        # the real judge_v3l-vintage 12-key cfg (no d_model/temporal_nhead)
         cfg = {"dino_model": "dinov3_vitl16", "dino_repo_dir": "",
               "embed_dim": 1024, "n_kp": 8, "fk_ee_link": "panda_link8",
               "pool": "attn", "n_heads": 4, "dino_input": 224, "patch_pool": 2,
@@ -328,87 +326,6 @@ class TestLoadReaderSplit:
         assert bool((out.aux["hand"] > 10.0).all())
 
 
-# ── ensemble round-trip (K=1 degrade, K=2 disagreement) ─────────────────────
-
-class TestEnsembleFromCheckpoint:
-    def test_k1_single_head_file_degrades_to_plain_reader(self, tmp_path):
-        head = _make_head(n_out=5)
-        path = str(tmp_path / "single.pt")
-        checkpoint_v2.save(path, head, view_layout=LAYOUT, sigma_scale=1.5)
-        robot = _FakeRobot("fourier_gr1", n_joints=5)
-
-        reader = EnsemblePoseReader.from_checkpoint(
-            path, robot=robot, view_layout=LAYOUT, backbone=_FakeBackbone(LAYOUT))
-
-        assert not isinstance(reader, EnsemblePoseReader)
-        assert isinstance(reader, checkpoint_v2.ReadoutV2PoseReader)
-        out = reader.read(_clip())
-        # No fabricated 0 -- the epistemic axis is structurally absent, not
-        # present-and-zero. See ensemble.py's module docstring.
-        assert "epistemic" not in out.extras
-        assert "aleatoric" not in out.extras
-        assert "member_q" not in out.extras
-
-    def test_k1_ensemble_bundle_with_one_head_also_degrades(self, tmp_path):
-        head = _make_head(n_out=5)
-        path = str(tmp_path / "bundle_of_one.pt")
-        checkpoint_v2.save_ensemble(path, [head], view_layout=LAYOUT)
-        robot = _FakeRobot("fourier_gr1", n_joints=5)
-        reader = EnsemblePoseReader.from_checkpoint(
-            path, robot=robot, view_layout=LAYOUT, backbone=_FakeBackbone(LAYOUT))
-        assert not isinstance(reader, EnsemblePoseReader)
-
-    def test_k2_bundle_round_trip_computes_member_disagreement(self, tmp_path):
-        head_a = _make_head(n_out=5, seed=0)
-        head_b = _make_head(n_out=5, seed=1)
-        path = str(tmp_path / "ens.pt")
-        checkpoint_v2.save_ensemble(path, [head_a, head_b], view_layout=LAYOUT,
-                                    sigma_scale=1.5, meta={"note": "roundtrip"})
-        robot = _FakeRobot("fourier_gr1", n_joints=5)
-        backbone = _FakeBackbone(LAYOUT)
-
-        reader = EnsemblePoseReader.from_checkpoint(
-            path, robot=robot, view_layout=LAYOUT, backbone=backbone)
-
-        assert isinstance(reader, EnsemblePoseReader)
-        assert len(reader.members) == 2
-        assert reader.limit_semantics == "raw_rad"
-
-        out = reader.read(_clip())
-        assert out.extras["n_members"] == 2
-        assert out.extras["member_q"].shape == (2, 1, 5, 5)
-        assert "epistemic" in out.extras and "aleatoric" in out.extras
-        # Two DIFFERENTLY-SEEDED heads reading the same clip should disagree
-        # somewhere -- this is the actual "member disagreement is computed"
-        # check the task asks for, not merely "the key exists".
-        assert float(out.extras["epistemic"].abs().sum()) > 0.0
-
-    def test_k2_bundle_applies_sigma_scale_to_every_member(self, tmp_path):
-        head_a = _make_head(n_out=4, seed=0)
-        head_b = _make_head(n_out=4, seed=1)
-        path = str(tmp_path / "ens.pt")
-        checkpoint_v2.save_ensemble(path, [head_a, head_b], view_layout=LAYOUT,
-                                    sigma_scale=2.0)
-        robot = _FakeRobot("fourier_gr1", n_joints=4)
-        backbone = _FakeBackbone(LAYOUT)
-
-        reader = EnsemblePoseReader.from_checkpoint(
-            path, robot=robot, view_layout=LAYOUT, backbone=backbone)
-        for m in reader.members:
-            assert torch.allclose(m.sigma_scale, torch.tensor([2.0]))
-
-    def test_ensemble_bundle_rejects_robot_needing_more_joints_than_heads_predict(
-            self, tmp_path):
-        head_a = _make_head(n_out=3, seed=0)
-        head_b = _make_head(n_out=3, seed=1)
-        path = str(tmp_path / "ens.pt")
-        checkpoint_v2.save_ensemble(path, [head_a, head_b], view_layout=LAYOUT)
-        robot = _FakeRobot("fourier_gr1", n_joints=6)
-        with pytest.raises(ValueError, match="only predicts"):
-            EnsemblePoseReader.from_checkpoint(
-                path, robot=robot, view_layout=LAYOUT, backbone=_FakeBackbone(LAYOUT))
-
-
 # ── unified auto-routing entry point: readers.checkpoint.load_reader ────────
 
 class TestUnifiedLoadReaderRouting:
@@ -422,19 +339,24 @@ class TestUnifiedLoadReaderRouting:
         assert isinstance(reader, checkpoint_v2.ReadoutV2PoseReader)
         assert reader.limit_semantics == "raw_rad"
 
-    def test_routes_attentive_cfg_to_squashed_pose_reader(self, tmp_path):
-        from kinescore.heads.attentive import AttentivePoseHead
-        from kinescore.readers import checkpoint as ckpt
-        from kinescore.readers.squashed import SquashedPoseReader
+    def test_routes_attentive_cfg_to_not_implemented(self, tmp_path):
+        """The squashed pose-reader path (SquashedPoseReader) was removed --
+        see legacy_docs/PROVENANCE.md's D7 addendum. A legacy AttentivePoseHead-format
+        checkpoint therefore has no reader left to route to at all; this must
+        fail loudly (naming the checkpoint) rather than silently building
+        something that would only ever report structurally-fake metrics.
 
-        head = AttentivePoseHead(in_dim=D, hidden=8, n_joints=5, n_heads=2, n_cams=1)
-        head.eval()
-        path = str(tmp_path / "attentive.pt")
+        Only the checkpoint's cfg SHAPE matters for routing (checked before
+        any model construction) -- so this writes a legacy-format ``{"head",
+        "cfg", "meta"}`` file directly rather than via the now-deleted
+        ``AttentivePoseHead``/``readers/checkpoint.py::save``."""
         layout = ViewLayout(n_views=1, tokens_per_view=P_TOKENS)
-        ckpt.save(path, head, view_layout=layout, robot_name="franka_panda",
-                 limit_semantics="squashed")
+        path = str(tmp_path / "attentive.pt")
+        cfg = {"hidden": 8, "n_heads": 2, "n_cams": 1, "embed_dim": D,
+              "dropout": 0.1, "robot_name": "franka_panda",
+              "view_layout_key": layout.key, "limit_semantics": "squashed"}
+        torch.save({"head": {}, "cfg": cfg, "meta": {}}, path)
         robot = _FakeRobot("franka_panda", n_joints=5)
-        reader = ckpt_mod.load_reader(path, robot=robot, view_layout=layout,
-                                      backbone=_FakeBackbone(layout))
-        assert isinstance(reader, SquashedPoseReader)
-        assert reader.limit_semantics == "squashed"
+        with pytest.raises(NotImplementedError, match="AttentivePoseHead"):
+            ckpt_mod.load_reader(path, robot=robot, view_layout=layout,
+                                 backbone=_FakeBackbone(layout))

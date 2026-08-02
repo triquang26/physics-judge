@@ -18,7 +18,7 @@ Gated behind ``@pytest.mark.ckpt`` (skipped by default -- see
 ``model_ckpt/readout_v2_gr1.pt`` -- deliberately a *different* env var from
 ``tests/conftest.py``'s ``KINESCORE_CIASC_ROOT`` (the Franka/AttentivePoseHead
 checkpoints live in a Marionette-ciasc checkout; this is a different source
-repo entirely, see ``docs/PROVENANCE.md``'s A/B split), so this file never
+repo entirely, see ``legacy_docs/PROVENANCE.md``'s A/B split), so this file never
 hardcodes anyone's absolute path.
 """
 from __future__ import annotations

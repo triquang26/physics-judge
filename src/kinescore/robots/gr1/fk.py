@@ -15,7 +15,9 @@ The canonical **predicted** vector this module consumes is the 17-D concatenatio
 ``q17 = [left_arm(7), right_arm(7), waist(3)]`` plus a 2-D gripper ``[left,right]``
 in ``[0,1]`` (the Fourier 6-DoF hand is treated as an open/close proxy — no finger
 physics; the arm chains end at the wrist/hand). Joint limits are read straight
-from the URDF (valid-by-construction sigmoid squash in the judge head).
+from the URDF and published as ``q_lo``/``q_hi`` for the reader's raw (unsquashed)
+prediction to be checked against post-hoc -- see ``limit_semantics="raw_rad"``
+in ``kinescore.core.reader`` for why no squash sits in the prediction path itself.
 
 Frozen, analytic, fully differentiable (``pytorch_kinematics``). No trainable
 weights.
@@ -35,8 +37,7 @@ this file against the source and see nothing but the rename and this docstring.
 """
 from __future__ import annotations
 
-import warnings
-from typing import Dict, List, Sequence, Tuple
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
@@ -45,24 +46,24 @@ __all__ = ["GR1FK", "LEFT_ARM_JOINTS", "RIGHT_ARM_JOINTS", "WAIST_JOINTS"]
 
 
 # ── URDF joint names, in the dataset's 44-dim sub-block order (Phase-0 verified) ──
-LEFT_ARM_JOINTS: Tuple[str, ...] = (
+LEFT_ARM_JOINTS: tuple[str, ...] = (
     "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
     "left_elbow_pitch_joint", "left_wrist_yaw_joint", "left_wrist_roll_joint",
     "left_wrist_pitch_joint",
 )
-RIGHT_ARM_JOINTS: Tuple[str, ...] = (
+RIGHT_ARM_JOINTS: tuple[str, ...] = (
     "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
     "right_elbow_pitch_joint", "right_wrist_yaw_joint", "right_wrist_roll_joint",
     "right_wrist_pitch_joint",
 )
-WAIST_JOINTS: Tuple[str, ...] = ("waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint")
+WAIST_JOINTS: tuple[str, ...] = ("waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint")
 
 # Per-arm keypoint links (shoulder -> upper arm -> elbow -> wrist -> hand -> EE), K=6.
-KEYPOINTS_LEFT: Tuple[str, ...] = (
+KEYPOINTS_LEFT: tuple[str, ...] = (
     "left_upper_arm_pitch_link", "left_upper_arm_yaw_link", "left_lower_arm_pitch_link",
     "left_hand_yaw_link", "left_hand_pitch_link", "left_end_effector_link",
 )
-KEYPOINTS_RIGHT: Tuple[str, ...] = (
+KEYPOINTS_RIGHT: tuple[str, ...] = (
     "right_upper_arm_pitch_link", "right_upper_arm_yaw_link", "right_lower_arm_pitch_link",
     "right_hand_yaw_link", "right_hand_pitch_link", "right_end_effector_link",
 )
@@ -94,7 +95,10 @@ FINGER_RENDER = {
 WRIST_LINK = {"left": "left_hand_pitch_link", "right": "right_hand_pitch_link"}
 
 # Limits margin (rad): teleop occasionally exceeds the URDF limit slightly
-# (e.g. right_wrist_pitch), so widen the squash range a touch to stay valid.
+# (e.g. right_wrist_pitch), so widen the published [q_lo, q_hi] clamp range a
+# touch -- there is no squash to widen (raw_rad predictions are never forced
+# inside limits); this only keeps clamp_for_fk/loss_limit from flagging a
+# hair-over-limit teleop frame as a violation it isn't.
 _LIMIT_MARGIN = 0.20
 
 
@@ -141,7 +145,7 @@ class GR1FK(nn.Module):
         with open(urdf_path, "rb") as f:
             chain = pk.build_chain_from_urdf(f.read())
         self.chain = chain.to(dtype=self.dtype, device=self.device)
-        self._chain_joint_names: List[str] = list(self.chain.get_joint_parameter_names())
+        self._chain_joint_names: list[str] = list(self.chain.get_joint_parameter_names())
         self.n_joints = self.chain.n_joints
 
         avail = set(self.chain.get_frame_names(exclude_fixed=False))
@@ -155,7 +159,7 @@ class GR1FK(nn.Module):
         self.num_keypoints = len(KEYPOINTS_LEFT)
 
         # canonical predicted-joint order and its chain-index positions
-        self.pred_joints: Tuple[str, ...] = LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS + WAIST_JOINTS
+        self.pred_joints: tuple[str, ...] = LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS + WAIST_JOINTS
         self._pred_chain_idx = torch.tensor(
             [self._chain_joint_names.index(n) for n in self.pred_joints], dtype=torch.long)
         self.register_buffer("pred_chain_idx", self._pred_chain_idx)
@@ -174,7 +178,7 @@ class GR1FK(nn.Module):
 
     # ── construction helpers ─────────────────────────────────────────────────
     @staticmethod
-    def _read_urdf_limits(urdf_path: str, joints: Sequence[str]) -> Tuple[list, list, list]:
+    def _read_urdf_limits(urdf_path: str, joints: Sequence[str]) -> tuple[list, list, list]:
         """Return ``(lower, upper, velocity)`` per joint from the URDF ``<limit>`` tags.
 
         The ``velocity="…"`` attribute of the same ``<limit>`` element that carries
@@ -185,10 +189,10 @@ class GR1FK(nn.Module):
         root = ET.parse(urdf_path).getroot()
         lim, vlim = {}, {}
         for j in root.findall("joint"):
-            l = j.find("limit")
-            if l is not None and j.get("type") in ("revolute", "prismatic"):
-                lim[j.get("name")] = (float(l.get("lower")), float(l.get("upper")))
-                v = l.get("velocity")
+            limit_el = j.find("limit")
+            if limit_el is not None and j.get("type") in ("revolute", "prismatic"):
+                lim[j.get("name")] = (float(limit_el.get("lower")), float(limit_el.get("upper")))
+                v = limit_el.get("velocity")
                 vlim[j.get("name")] = float(v) if v is not None else 1.0e3
         lo = [lim[n][0] for n in joints]
         hi = [lim[n][1] for n in joints]
@@ -218,7 +222,7 @@ class GR1FK(nn.Module):
             self.chain = self.chain.to(device=device)
             self.device = device
 
-    def _compute_rest_bones(self, side: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _compute_rest_bones(self, side: str) -> tuple[torch.Tensor, torch.Tensor]:
         k = self.num_keypoints
         pairs = torch.tensor([[i, i + 1] for i in range(k - 1)], dtype=torch.long)
         with torch.no_grad():
@@ -228,7 +232,7 @@ class GR1FK(nn.Module):
         return pairs, diffs.norm(dim=-1).to(self.dtype).cpu()
 
     # ── forward kinematics ───────────────────────────────────────────────────
-    def _stack(self, transforms: Dict[str, "object"], links: Sequence[str], n: int,
+    def _stack(self, transforms: dict[str, object], links: Sequence[str], n: int,
                want_rot: bool = False):
         mats = [transforms[name].get_matrix() for name in links]  # K×(n,4,4)
         M = torch.stack(mats, dim=1)                              # (n,K,4,4)
@@ -266,7 +270,7 @@ class GR1FK(nn.Module):
         return M.reshape(b, t, len(link_names), 4, 4)
 
     def forward_transforms(self, q17: torch.Tensor, side: str
-                           ) -> Tuple[torch.Tensor, torch.Tensor]:
+                           ) -> tuple[torch.Tensor, torch.Tensor]:
         """``(B,T,17) -> P (B,T,K,3), R (B,T,K,3,3)`` (positions + per-link rotations)."""
         b, t = q17.shape[0], q17.shape[1]
         with torch.autocast(device_type=q17.device.type, enabled=False):
@@ -278,7 +282,7 @@ class GR1FK(nn.Module):
         return P, R
 
     def ee_pose(self, q17: torch.Tensor, side: str
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+                ) -> tuple[torch.Tensor, torch.Tensor]:
         """``(B,T,17) -> pos (B,T,3), rotvec (B,T,3)`` for the arm's EE link."""
         b, t = q17.shape[0], q17.shape[1]
         with torch.autocast(device_type=q17.device.type, enabled=False):
@@ -290,7 +294,7 @@ class GR1FK(nn.Module):
         return pos, rotvec
 
     @property
-    def joint_limits(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def joint_limits(self) -> tuple[torch.Tensor, torch.Tensor]:
         return self.q_lo, self.q_hi
 
     # ── kinematic depth (for the observability-gate prior) ───────────────────
@@ -317,11 +321,12 @@ class GR1FK(nn.Module):
             d, cur = 0, link
             while cur in parent:
                 par, act = parent[cur]
-                d += int(act); cur = par
+                d += int(act)
+                cur = par
             return d
 
         jdepth = [depth_of_link(child_of[n]) for n in self.pred_joints]   # (17,)
-        kpdepth = {s: [depth_of_link(l) for l in self.keypoints[s]]
+        kpdepth = {s: [depth_of_link(kp) for kp in self.keypoints[s]]
                    for s in ("left", "right")}
         return jdepth, kpdepth
 

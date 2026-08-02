@@ -9,11 +9,19 @@ inside :func:`get_robot`, so a caller who only ever asks for
 ``import pytorch_kinematics`` in ``franka/fk.py`` / ``gr1/fk.py``, which can
 otherwise fail on a machine that has not installed the (heavier, optional-in-
 spirit-even-though-listed-as-a-core-dependency) kinematics stack.
+
+Built on :class:`kinescore.core.registry.Registry` -- the same ``name ->
+lazy factory -> T`` mechanism :mod:`kinescore.bench.sources.registry` uses.
+This module used to keep its own hand-rolled ``_FACTORIES`` dict instead,
+because :meth:`~kinescore.core.registry.Registry.get` originally took no
+kwargs while robot factories need ``device=``/``dtype=``/``urdf_path=``
+overrides; a mechanical swap would have silently dropped them.
+``Registry.get`` now forwards ``**kwargs`` to the factory, so that gap is
+closed and this axis no longer needs a second mechanism.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
-
+from kinescore.core.registry import Registry
 from kinescore.core.robot import RobotSpec
 from kinescore.robots.synthetic import Synthetic2R
 
@@ -30,18 +38,29 @@ def _build_gr1(**kwargs) -> RobotSpec:
     return GR1Spec(**kwargs)
 
 
+def _build_airbot_mmk2(**kwargs) -> RobotSpec:
+    from kinescore.robots.airbot_mmk2.spec import AirbotMMK2Spec
+    return AirbotMMK2Spec(**kwargs)
+
+
+def _build_aloha_bimanual(**kwargs) -> RobotSpec:
+    from kinescore.robots.aloha.spec import AlohaSpec
+    return AlohaSpec(**kwargs)
+
+
 def _build_synthetic(**kwargs) -> RobotSpec:
     return Synthetic2R(**kwargs)
 
 
 #: Registry key -> zero-import-cost factory. Each factory does its own heavy
-#: imports lazily (see module docstring); constructing the entries dict below
+#: imports lazily (see module docstring); constructing the registry below
 #: does not import pytorch_kinematics/robot_descriptions itself.
-_FACTORIES: dict[str, Callable[..., RobotSpec]] = {
-    "franka_panda": _build_franka,
-    "fourier_gr1": _build_gr1,
-    "synthetic_2r": _build_synthetic,
-}
+_REGISTRY: Registry[RobotSpec] = Registry(kind="robot")
+_REGISTRY.register("franka_panda", _build_franka)
+_REGISTRY.register("fourier_gr1", _build_gr1)
+_REGISTRY.register("airbot_mmk2", _build_airbot_mmk2)
+_REGISTRY.register("aloha_bimanual", _build_aloha_bimanual)
+_REGISTRY.register("synthetic_2r", _build_synthetic)
 
 
 def get_robot(name: str, **kwargs) -> RobotSpec:
@@ -57,7 +76,7 @@ def get_robot(name: str, **kwargs) -> RobotSpec:
 
     Raises
     ------
-    KeyError
+    ValueError
         If ``name`` is not registered -- lists the valid names, so a typo'd
         robot name fails at the call site instead of surfacing as a confusing
         ``AttributeError`` deep in a metric.
@@ -65,14 +84,9 @@ def get_robot(name: str, **kwargs) -> RobotSpec:
         Propagated unmodified from ``GR1Spec`` when ``KINESCORE_ASSETS`` is
         unset or the GR-1 URDF is not checked out under it.
     """
-    try:
-        factory = _FACTORIES[name]
-    except KeyError:
-        raise KeyError(
-            f"unknown robot {name!r}; available: {sorted(_FACTORIES)}") from None
-    return factory(**kwargs)
+    return _REGISTRY.get(name, **kwargs)
 
 
 def available_robots() -> tuple[str, ...]:
     """Registered robot names, in a stable (sorted) order."""
-    return tuple(sorted(_FACTORIES))
+    return _REGISTRY.available()

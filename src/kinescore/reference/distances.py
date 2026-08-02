@@ -35,7 +35,7 @@ refuses (``RateMismatchError``) to score a mismatched rate (defect D2).
 from __future__ import annotations
 
 import warnings
-from typing import Dict, Sequence, Union
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -50,7 +50,7 @@ __all__ = ["profile_w1", "kfd_approx", "kfd"]
 #: this cap keeps that cost bounded and explicit.
 DEFAULT_SUBSAMPLE_CAP = 2_000_000
 
-ArrayLike = Union[np.ndarray, torch.Tensor, Sequence[float]]
+ArrayLike = np.ndarray | torch.Tensor | Sequence[float]
 
 
 def _as_numpy(x: ArrayLike) -> np.ndarray:
@@ -106,7 +106,7 @@ def profile_w1(a: ArrayLike, b: ArrayLike, n_q: int = 100, *,
     return float(np.mean(np.abs(qa - qb)))
 
 
-def _feat_vector(samples: Dict[str, ArrayLike], keys: Sequence[str]) -> np.ndarray:
+def _feat_vector(samples: dict[str, ArrayLike], keys: Sequence[str]) -> np.ndarray:
     """Per-rollout feature = ``[mean, std]`` of each quantity, SUITE key order.
 
     ``keys`` must come from ``MetricSuite.quantity_keys`` -- never from

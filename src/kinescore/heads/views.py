@@ -21,20 +21,11 @@ directions (see :meth:`ViewLayout.assert_tokens`).
 Zero-init is what makes this backward compatible: a ``ViewEmbedding`` built
 with ``n_views=1`` adds a bias of exactly ``0`` to every token, so routing
 single-view features through it is bit-identical to not routing them through
-anything (see ``tests/test_multiview_layout.py``). That means new heads (or
-readers composing heads that never had multiview support at all --
-:class:`~kinescore.heads.heteroscedastic.ReadoutV2Head`,
-:class:`~kinescore.heads.disentangled.DisentangledPoseHead`,
-:class:`~kinescore.heads.mlp.DinoPoseHead`) can gain the same multiview
-capability by composing this module in front of them, without special-casing
-the single-view path.
-
-Note: :class:`~kinescore.heads.attentive.AttentivePoseHead` does **not** use
-this module internally -- it keeps its own source-verbatim, checkpoint-
-load-bearing ``cam_emb`` (conditional on ``n_cams > 1``, exact parameter name
-and shape) so real checkpoints (``judge_v3l_mv``) still ``load_state_dict``
-with ``strict=True``. It gets the same D4 fix a different way: see its
-docstring.
+anything (see ``tests/test_multiview_layout.py``). That is exactly what lets
+``readers/heteroscedastic.py::HeteroscedasticPoseReader`` compose this module
+in front of :class:`~kinescore.heads.heteroscedastic.ReadoutV2Head` -- which
+has no native multiview support of its own -- to gain multiview capability,
+without special-casing the single-view path.
 """
 from __future__ import annotations
 
@@ -61,10 +52,12 @@ class ViewEmbedding(nn.Module):
         :meth:`~kinescore.core.clip.ViewLayout.assert_tokens`).
     """
 
-    def __init__(self, in_dim: int, view_layout: ViewLayout = ViewLayout()) -> None:
+    def __init__(self, in_dim: int, view_layout: ViewLayout | None = None) -> None:
         super().__init__()
         self.in_dim = int(in_dim)
-        self.view_layout = view_layout
+        # ViewLayout is a frozen dataclass -- a fresh default() per call is
+        # equivalent to the module-level singleton B008 asks for, without one.
+        self.view_layout = view_layout if view_layout is not None else ViewLayout()
         # Always present, zero-init -- see module docstring. Shape (V, D).
         self.cam_emb = nn.Parameter(
             torch.zeros(self.view_layout.n_views, self.in_dim))

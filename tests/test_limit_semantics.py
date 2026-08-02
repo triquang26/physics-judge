@@ -12,10 +12,15 @@ for a property the head structurally cannot fail. ``kinescore.core.metric``
 this file checks that :mod:`kinescore.metrics.joint_limits` actually uses
 that mechanism rather than silently computing (and returning) the
 structurally-guaranteed zero.
+
+The squashed pose-reader path itself (``readers/squashed.py::SquashedPoseReader``,
+the only reader that ever actually set ``limit_semantics="squashed"``) has
+been removed -- see ``legacy_docs/PROVENANCE.md``'s D7 addendum -- so this file no
+longer exercises a live "squashed" ``MetricContext``; it covers the
+``raw_rad`` half of the contract, which is what every real reader now
+produces.
 """
 from __future__ import annotations
-
-import math
 
 import pytest
 import torch
@@ -30,35 +35,10 @@ def _robot() -> FakeRobot:
         q_lo=torch.tensor([-1.0, -1.0]), q_hi=torch.tensor([1.0, 1.0]))
 
 
-def test_squashed_semantics_yields_nan_with_reason_not_zero():
-    """Even feeding q_raw values that are WELL outside the limits, a
-    squashed-semantics context must resolve to NaN + reason -- the flag
-    gates the metric before the arithmetic ever runs, exactly the D7 fix."""
-    robot = _robot()
-    T = 5
-    q_raw_way_out_of_bounds = torch.full((1, T, 2), 100.0)          # would violate massively
-    ctx = MetricContext(
-        dt=0.1, q=torch.zeros(1, T, 2), q_raw=q_raw_way_out_of_bounds,
-        robot=robot, flags={"limit_semantics": "squashed"})
-
-    frac = LimitViolationFrac().compute(ctx)
-    excess = LimitExcessRad().compute(ctx)
-
-    assert not frac.available
-    assert frac.reason == "unobservable:limit_semantics=squashed"
-    assert math.isnan(frac.value)
-    assert not (frac.value == 0.0)          # the exact anti-pattern D7 forbids
-
-    assert not excess.available
-    assert excess.reason == "unobservable:limit_semantics=squashed"
-    assert math.isnan(excess.value)
-    assert not (excess.value == 0.0)
-
-
-def test_squashed_semantics_still_nan_even_without_flag_if_q_raw_missing():
-    """A squashed reader's Readout.q_raw is documented as None -- so even
-    without the explicit flag, a context missing q_raw must resolve to NaN
-    (missing_input), never a fabricated pass."""
+def test_missing_q_raw_gives_nan_with_reason_not_zero():
+    """Any reader that does not expose ``q_raw`` (the squashed reader always
+    did not; a raw_rad reader that simply omits it would too) must resolve
+    to NaN (missing_input), never a fabricated pass."""
     robot = _robot()
     T = 5
     ctx = MetricContext(dt=0.1, q=torch.zeros(1, T, 2), q_raw=None, robot=robot)

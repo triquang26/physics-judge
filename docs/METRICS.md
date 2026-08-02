@@ -10,13 +10,25 @@ jerk = 3, a purely geometric quantity = 0); every declared exponent is
 verified numerically by `tests/test_metric_registry_conformance.py`, so a
 wrong declaration here would fail CI.
 
-There are **28** registered metrics across 8 modules:
-`rigidity` (4), `temporal` (5), `angular` (3), `energy` (3),
-`joint_limits` (3), `joint_dynamics` (4), `smoothness` (2),
-`feasibility` (4). `src/kinescore/metrics/suites.py::INVARIANT_V1` is the
-shared suite all 28 belong to; 10 of them additionally form the PIS
-(`invariant_keys`) — see [ADDING_A_METRIC.md](ADDING_A_METRIC.md) for what
-changing that set costs.
+There are **31** registered metrics across 9 modules:
+`rigidity` (6, including `rigidity_worst_bone_mm`/`_all_mm` -- see D-A),
+`temporal` (5), `angular` (3), `energy` (3), `joint_limits` (3),
+`joint_dynamics` (4), `smoothness` (2), `feasibility` (4), `torque` (1).
+`src/kinescore/metrics/suites.py::INVARIANT_V1` carries **26** of them — the
+legacy `*_all_mm` variants (`rigidity_residual_all_mm`, `rigidity_wobble_all_mm`,
+`rigidity_worst_bone_all_mm`) and `torque_frac_rated`/`rigidity_worst_bone_mm`
+are registered but excluded (the `_all_mm` trio exist only to reproduce
+pre-port numbers, see D9; the latter two are `ALL_METRICS`-only, see D-E,
+to avoid mutating `INVARIANT_V1`'s frozen `suite_id`); 10 of the 26
+additionally form the PIS (`invariant_keys`) — see
+[ARCHITECTURE.md](ARCHITECTURE.md#adding-a-metric) for what changing that set
+costs (the original walkthrough is preserved at
+[legacy_docs/ADDING_A_METRIC.md](../legacy_docs/ADDING_A_METRIC.md)).
+
+`src/kinescore/metrics/suites.py::RATE_FREE` is a second suite holding the
+**9** metrics with `dt_exponent == 0`, derived from the registry rather than
+listed by hand. It is the only suite valid for comparing clips recorded at
+different frame rates — see [RATE_POLICY.md](../legacy_docs/RATE_POLICY.md).
 
 Legend: **PIS** = in `INVARIANT_V1.invariant_keys` (the Physical Invariance
 Score's fixed term set). **perframe** = also emits a per-frame array for
@@ -40,7 +52,7 @@ lengths. Requires `P`.
   contributes identically whether the clip is fast or slow. Under
   `bone_set="all"` it is **contaminated by gripper actuation** — see
   `rigidity_residual_all_mm` below and defect D9 in
-  [PROVENANCE.md](PROVENANCE.md#d9--gripper-contaminates-rigidity-found-during-this-migration):
+  [PROVENANCE.md](../legacy_docs/PROVENANCE.md#d9--gripper-contaminates-rigidity-found-during-this-migration):
   a perfectly rigid, motionless Franka arm holding its gripper open scores
   **15.37 mm** under the legacy bone set (0.00 mm closed; 7.2 mm for a
   ramped 0→1 open) purely from the gripper-finger bones, none of which is a
@@ -94,7 +106,7 @@ Linear dynamics on keypoint trajectories (speed/accel/jerk via
 - **Units.** m/s. **`dt` exponent.** `1`. **Direction.** lower_better.
 - **Detects.** Overall motion magnitude relative to a reference speed
   distribution (via W1, not this raw number alone — see
-  [PROVENANCE.md](PROVENANCE.md), PIS caveat below).
+  [PROVENANCE.md](../legacy_docs/PROVENANCE.md), PIS caveat below).
 - **Does NOT detect.** Whether the speed is *appropriate* for the task — a
   fast wipe and a slow insertion are both physically plausible at very
   different speeds, which is exactly why this is a task-*dependent*
@@ -250,7 +262,7 @@ them. Requires `P`.
 ## joint_limits — `src/kinescore/metrics/joint_limits.py`
 
 Joint-limit feasibility. Retargeted at `q_raw`, not `q` — see
-[PROVENANCE.md](PROVENANCE.md#d7--limit_violation-structurally-always-0) (D7).
+[PROVENANCE.md](../legacy_docs/PROVENANCE.md#d7--limit_violation-structurally-always-0) (D7).
 
 ### `limit_violation_frac`  — **PIS**
 
@@ -262,16 +274,22 @@ Joint-limit feasibility. Retargeted at `q_raw`, not `q` — see
   `limit_semantics=squashed`.
 - **Detects.** A `"raw_rad"` reader's joint reading exceeding the URDF's
   declared `[q_lo, q_hi]` in at least one joint, for a frame.
-- **Does NOT detect anything at all under a squashed-head reader** — it is
-  **structurally `0`** by construction of the head, not by anything about the
-  video (the whole of defect D7). kinescore reports this as `null`
-  (`NaN` + `"unobservable:limit_semantics=squashed"`), **never `0`**, for
-  every squashed-head reader — every real Franka checkpoint
-  (`judge_v3l`, `judge_v3l_mv`, `judge_reward`). This metric **is**
-  observable for the GR-1 production checkpoint (`readout_v2_gr1.pt`,
-  `ReadoutV2Head` → `HeteroscedasticPoseReader`, `limit_semantics="raw_rad"`)
-  — squashed vs. raw_rad is a per-robot, per-head-family property, not a
-  package-wide default; see [PROVENANCE.md](PROVENANCE.md#d10--readoutv2head-had-no-checkpoint-loader--cli-wiring-prioritization-correction).
+- **Does NOT detect anything at all under a reader whose `limit_semantics`
+  is `"squashed"`** — under such a head this is **structurally `0`** by
+  construction, not by anything about the video (the whole of defect D7).
+  kinescore reports this as `null` (`NaN` +
+  `"unobservable:limit_semantics=squashed"`), **never `0`**, for such a
+  reader. As of the [PROVENANCE.md](../legacy_docs/PROVENANCE.md#d7-addendum-2026-07-29--the-squashed-pose-reader-path-removed)
+  D7 addendum, **no reader in this package produces `limit_semantics="squashed"`
+  any more** — the squashed pose-reader path (`SquashedPoseReader`) was
+  removed, and every real checkpoint (GR-1, Airbot MMK2, Franka) is
+  `"raw_rad"` — so this caveat is now the description of a general mechanism
+  (`unobservable_when`/`MetricValue.unavailable`, still live and still tested)
+  rather than an active caveat about any real, loadable checkpoint. This
+  metric **is** observable for the GR-1 production checkpoint
+  (`readout_v2_gr1.pt`, `ReadoutV2Head` → `HeteroscedasticPoseReader`,
+  `limit_semantics="raw_rad"`) and for every other reader currently
+  shippable; see [PROVENANCE.md](../legacy_docs/PROVENANCE.md#d10--readoutv2head-had-no-checkpoint-loader--cli-wiring-prioritization-correction).
 
 ### `limit_excess_rad`
 
@@ -281,8 +299,10 @@ Joint-limit feasibility. Retargeted at `q_raw`, not `q` — see
 - **Detects.** *How much* a `"raw_rad"` reader's joints overshoot the limits
   by, on average — the clamp magnitude on the unsquashed reading **is** the
   signal.
-- **Does NOT detect** anything under a squashed head — same caveat as
-  `limit_violation_frac`, `null` not `0`.
+- **Does NOT detect** anything under a reader whose `limit_semantics` is
+  `"squashed"` — same caveat as `limit_violation_frac`, `null` not `0`, and
+  the same note that no such reader currently exists in this package (see
+  the D7 addendum linked above).
 
 ### `limit_headroom_rad`
 
@@ -292,11 +312,13 @@ Joint-limit feasibility. Retargeted at `q_raw`, not `q` — see
 - **Units.** rad. **`dt` exponent.** `0`. **Direction.** **higher_better** —
   the one metric in this package where more is better.
 - **Detects.** How close a trajectory gets to a mechanical extreme, observable
-  under **any** `limit_semantics` — the closest a squashed head can express
-  "did this look like it was straining against its limits" even though it can
-  never literally cross them.
-- **Does NOT detect** an actual violation (it structurally cannot, by
-  definition — a squashed `q` is always inside `[lo,hi]`); complements, does
+  under **any** `limit_semantics` — the closest a squashed head could express
+  "did this look like it was straining against its limits" even though it
+  could never literally cross them. Observable (and generally more
+  informative, since violation is impossible) under `"raw_rad"` too.
+- **Does NOT detect** an actual violation by itself (a reader would need to
+  report `q` outside `[lo,hi]` for that, which no reader's `q` — as opposed
+  to `q_raw` — ever does by contract, squashed or not); complements, does
   not replace, `limit_violation_frac`/`limit_excess_rad` for a `"raw_rad"`
   reader.
 
@@ -360,6 +382,59 @@ Joint-space kinematics/feasibility from `q`.
   `missing_input:effort_limits`, never `0.0`, for a robot without
   URDF-declared effort limits (e.g. `Fourier GR-1` — `GR1FK` has no effort
   data at all, so `GR1Spec.effort_limits is None` always).
+
+## torque — `src/kinescore/metrics/torque.py`
+
+The one **dynamics** ruler in the package -- every other metric is kinematic
+or arbitrary-unit smoothness; this one is hardware-anchored: does the
+recovered motion need more torque than the real motors deliver? Ports
+`Marionette-fkjepa/scripts/gr1/54_torque_feasibility.py`.
+
+### `torque_frac_rated`
+
+- **Formula.** Per-arm hand-rolled Newton-Euler over FK link frames (**not**
+  pinocchio, **not** a true recursive RNEA -- no inter-arm Coriolis
+  coupling, no floating base, each arm its own open chain rooted at a
+  stationary waist; source says the same about itself). Central-difference
+  world kinematics give each link's CoM accel `a_i` and angular
+  velocity/accel `w_i`/`al_i`; Newton-Euler wrench `F_i = m_i(a_i - g)`,
+  `N_i = I_i^w al_i + w_i x (I_i^w w_i)`; joint torque by virtual work,
+  `tau_j = sum_{i in distal(j)} z_j.((c_i-p_j) x F_i) + z_j.N_i`. Verified
+  against an independent closed-form static-gravity-hold answer
+  (`tests/test_torque.py::test_static_gravity_hold_matches_closed_form`).
+  `q` is Gaussian-smoothed (`sigma` in **frames**, not seconds) and
+  `clamp_for_fk`-clamped before differentiating, identically for every clip.
+  Clip statistic: per-frame envelope `max_j(|tau_j|/effort_j)` (URDF-rated
+  N·m), then the `p98` percentile over interior frames (`clip_peak_pct`) --
+  envelope-then-percentile, not percentile-then-max (a materially different,
+  wrong statistic, pinned by
+  `test_clip_peak_pct_pins_envelope_then_percentile_order`). Endpoints
+  (`t=0`, `t=T-1`) are a static-hold approximation (`a`/`w`/`al` exactly
+  zero there, `F` still includes gravity) and are excluded from the
+  statistic, not averaged in.
+- **Units.** percent of rated effort. **`dt` exponent.** **`None`** --
+  `F_i = m_i(a_i - g)` sums a `dt^-2` inertial term with a `dt^0` fixed
+  gravity term, the same non-homogeneous-sum shape as `total_energy_tstd`
+  (not a threshold-crossing reason like `vel_violation_frac`/`effort_proxy`).
+  Dividing by the `dt`-independent URDF `effort` constant and taking a
+  percentile both preserve whatever power law the numerator has, so the
+  non-homogeneity is entirely in `tau` itself. **Direction.** lower_better.
+  **`min_frames`.** 3. **perframe.** the pre-percentile envelope
+  `100*max_j(|tau_j|/effort_j)`, trace length `n_frames - 2` (endpoints
+  dropped).
+- **Scope.** Wired for `fourier_gr1` only -- the generalised chain-dynamics
+  builder (`robots/inertia.py::build_chain_dynamics`) works for any URDF,
+  but no other robot's numbers have been verified against a source script.
+  `NaN` + `unsupported_robot:<name>` (or `missing_input:effort_limits` /
+  `missing_input:inertial` for a URDF missing what a wired chain needs),
+  never a fabricated near-infinite/zero fallback.
+- **Detects.** Whether the recovered motion is physically deliverable by the
+  real motors, the only ruler in the package with a real physical ceiling
+  (over 100% is genuinely impossible, not merely unusual -- `legacy_docs/DECISIONS.md` D-E).
+- **Does NOT detect** anything reliably across different frame rates
+  (`dt_exponent=None`); is not a full RNEA (no inter-arm coupling, no
+  floating base) -- an approximation good enough for a bimanual arm-only
+  benchmark, checked against a closed form, not assumed correct.
 
 ## smoothness — `src/kinescore/metrics/smoothness.py`
 
@@ -486,7 +561,7 @@ caveat here matters just as much when reading a headline number.
 - **PIS** (`reference/normalize.py::invariance_score`) — aggregates the 10
   `invariant_keys` above into one `[0,1]` score. Comparable **only within one
   `suite_id`** (`MetricSuite.suite_id` — a hash of the exact declared term
-  set; see [PROVENANCE.md](PROVENANCE.md) D3(a)) and **only against a
+  set; see [PROVENANCE.md](../legacy_docs/PROVENANCE.md) D3(a)) and **only against a
   reference built at the same `dt`** (`RateMismatchError` — see D2). Two PIS
   numbers from different suites or different reference rates are not the same
   benchmark, full stop, regardless of how similar the numbers look.

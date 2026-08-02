@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 
+NAME = "cache"
 HELP = "precompute frozen-backbone patch tokens for training"
 
 
@@ -33,6 +34,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--n-views", type=int, default=1)
     parser.add_argument("--view-order", default=None)
     parser.add_argument("--max-frames", type=int, default=0)
+    parser.add_argument("--frame-chunk", type=int, default=0,
+                        help="encode at most this many frames of an episode "
+                             "per backbone call (0 = whole episode at once, "
+                             "the historical behaviour); set this on a long "
+                             "episode + high --dino-input to avoid OOMing a "
+                             "shared GPU -- see training/cache.py::encode_clip")
     parser.add_argument("--limit", type=int, default=0,
                         help="cap episodes per split (0 = all)")
     parser.add_argument("--device", default="cpu")
@@ -59,7 +66,8 @@ def run(args: argparse.Namespace) -> int:
             out_root=args.out, split=split, backbone=backbone,
             view_layout=view_layout, pattern=args.pattern, limit=args.limit,
             device=args.device, overwrite=args.overwrite,
-            max_frames=args.max_frames, progress=print)
+            max_frames=args.max_frames, frame_chunk=args.frame_chunk,
+            progress=print)
         for k in totals:
             totals[k] += summary[k]
 

@@ -45,6 +45,7 @@ from kinescore.metrics import (
                                rigidity,
                                smoothness,
                                temporal,
+                               torque,
 )
 from kinescore.metrics.angular import (
                                MaxAngularSpeed,
@@ -78,10 +79,11 @@ from kinescore.metrics.temporal import (
                                MeanJerk,
                                MeanSpeed,
 )
+from kinescore.metrics.torque import TorqueFracRated
 
 __all__ = [
     "angular", "energy", "feasibility", "joint_dynamics", "joint_limits",
-    "rigidity", "smoothness", "temporal",
+    "rigidity", "smoothness", "temporal", "torque",
     "RigidityResidual", "RigidityWobble",
     "MeanSpeed", "MeanAccel", "MaxAccel", "MeanJerk", "AccelViolationFrac",
     "MeanAngularSpeed", "MaxAngularSpeed", "MeanAngularAccel",
@@ -90,4 +92,5 @@ __all__ = [
     "MeanQdot", "MeanQddot", "VelViolationFrac", "EffortProxy",
     "Sparc", "LogDimensionlessJerk",
     "Penetration", "SelfCollision", "CoMBalance", "NoTeleport",
+    "TorqueFracRated",
 ]

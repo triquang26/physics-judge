@@ -8,14 +8,24 @@ that function's docstring), and this command does **not** catch that error
 into a skip. ``--allow-mixed-suites`` is the explicit, opt-in escape hatch;
 silently dropping a method/metric pair whose suite_ids disagree would hide
 the exact problem the guard exists to surface.
+
+Also writes two sections :mod:`kinescore.bench.stats` alone does not produce
+-- ``"separation"`` (one row per method/metric: paired tax + AUROC
+separation, via :func:`kinescore.bench.separation.separation_table`) and
+``"cache_ranking"`` (mean-rank-across-physical-axes table, via
+:func:`kinescore.bench.separation.rank_caches`). Both are additions to
+``stats.json``, not replacements for the existing ``"results"`` section --
+this command has never computed a composite score and does not start now
+(see ``bench/separation.py``'s module docstring for why).
 """
 from __future__ import annotations
 
 import argparse
-import glob
+import dataclasses
 import os
 import sys
 
+NAME = "aggregate"
 HELP = "compute paired physics-tax statistics from a scored run"
 
 
@@ -42,24 +52,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bootstrap", type=int, default=10000, dest="B",
                         help="bootstrap resamples for the median CI (default: 10000)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--min-episodes", type=int, default=None,
+                        help="minimum paired episodes for a separation row "
+                             "to be computed (default: "
+                             "kinescore.bench.separation.DEFAULT_MIN_EPISODES); "
+                             "below this a row still appears with `reason` set")
+    parser.add_argument("--noise-floor", type=float, default=None,
+                        help="frame-to-frame measurement noise floor, in the "
+                             "same units as each metric, applied uniformly to "
+                             "every metric's separation row's `above_noise` "
+                             "flag (omit to leave `above_noise` unknown/null)")
     parser.add_argument("--out", default=None,
                         help="stats.json path (default: <dir>/stats.json)")
 
 
-def _autodetect_manifest(dir_: str) -> str:
-    for name in ("bench_manifest.parquet", "bench_manifest.json"):
-        candidate = os.path.join(dir_, name)
-        if os.path.exists(candidate):
-            return candidate
-    matches = sorted(glob.glob(os.path.join(dir_, "*manifest*")))
-    if matches:
-        return matches[0]
-    raise FileNotFoundError(
-        f"no bench_manifest.parquet/.json found under {dir_!r}; pass "
-        f"--manifest explicitly")
-
-
 def run(args: argparse.Namespace) -> int:
+    import kinescore.metrics  # noqa: F401  (side effect: populates the metric registry)
+    from kinescore.bench import separation
+    from kinescore.bench.manifest import autodetect_manifest
     from kinescore.bench.stats import aggregate, load_scores
     from kinescore.cli._provenance import provenance_block, write_json
 
@@ -67,7 +77,9 @@ def run(args: argparse.Namespace) -> int:
     if not os.path.exists(results_path):
         print(f"[aggregate] no results.jsonl at {results_path!r}", file=sys.stderr)
         return 1
-    manifest_path = args.manifest or _autodetect_manifest(args.dir)
+    # required=True: aggregate immediately joins the manifest against
+    # results.jsonl -- there is nothing useful to do without one.
+    manifest_path = args.manifest or autodetect_manifest(args.dir)
 
     df = load_scores(results_path, manifest_path)
     if df.empty:
@@ -97,10 +109,29 @@ def run(args: argparse.Namespace) -> int:
             if out["n"] > 0:
                 results.append(out)
 
+    metric_keys = sorted({m.removeprefix("metrics.") for m in metrics})
+    sep_kwargs = {"B": args.B, "seed": args.seed, "noise_floor": args.noise_floor}
+    if args.min_episodes is not None:
+        sep_kwargs["min_episodes"] = args.min_episodes
+    separation_rows = separation.separation_table(df, methods, metric_keys, **sep_kwargs)
+    cache_ranking = separation.rank_caches(separation_rows,
+                                           baseline=args.baseline or "dense")
+
     out_path = args.out or os.path.join(args.dir, "stats.json")
     prov = provenance_block(n_summaries=len(results), methods=methods,
                             metrics=metrics, baseline=args.baseline,
-                            allow_mixed_suites=args.allow_mixed_suites)
-    write_json(out_path, {"provenance": prov, "results": results})
-    print(f"[aggregate] wrote {len(results)} method/metric summary(ies) -> {out_path}")
+                            allow_mixed_suites=args.allow_mixed_suites,
+                            min_episodes=(args.min_episodes
+                                         if args.min_episodes is not None
+                                         else separation.DEFAULT_MIN_EPISODES),
+                            noise_floor=args.noise_floor)
+    write_json(out_path, {
+        "provenance": prov,
+        "results": results,
+        "separation": [dataclasses.asdict(r) for r in separation_rows],
+        "cache_ranking": [dataclasses.asdict(r) for r in cache_ranking],
+    })
+    print(f"[aggregate] wrote {len(results)} method/metric summary(ies), "
+         f"{len(separation_rows)} separation row(s), "
+         f"{len(cache_ranking)} cache ranking row(s) -> {out_path}")
     return 0

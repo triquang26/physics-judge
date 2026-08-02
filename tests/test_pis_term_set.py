@@ -18,9 +18,11 @@ import pytest
 from kinescore.core.metric import MetricSpec
 from kinescore.core.suite import MetricSuite
 from kinescore.reference.fingerprint import RealMotionReference
-from kinescore.reference.normalize import (assert_comparable,
-                                            ComparabilityError,
-                                            invariance_score)
+from kinescore.reference.normalize import (
+    ComparabilityError,
+    assert_comparable,
+    invariance_score,
+)
 
 
 class _M:

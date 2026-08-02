@@ -118,7 +118,7 @@ def resolve_robot_description_urdf(module_attr: str) -> Path:
         ``AttributeError`` even after the package itself is imported, so this
         goes through :func:`importlib.import_module` instead (verified
         against the installed ``robot_descriptions`` package; see
-        ``docs/PROVENANCE.md``).
+        ``legacy_docs/PROVENANCE.md``).
 
     Imported lazily: importing this function must not require the
     ``robot_descriptions`` package to be installed, so that

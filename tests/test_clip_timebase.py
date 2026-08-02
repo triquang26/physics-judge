@@ -142,3 +142,155 @@ class TestViewLayout:
         layout = ViewLayout(n_views=3)
         with pytest.raises(ValueError):
             layout.view_height(577)
+
+
+class TestViewLayoutKeyStability:
+    """``key`` is stored in checkpoints and manifest rows and compared for
+    equality -- these pin the exact strings the real corpus already has on
+    disk (verified against ``kinescore_runtime/out/**/bench_manifest.parquet``:
+    every existing row's ``view_layout`` column is one of these two values).
+    Extending ``ViewLayout`` with ``packing``/``n_panels``/``panels`` must not
+    change either.
+    """
+
+    def test_1view_height_stack_key_unchanged(self):
+        assert ViewLayout(n_views=1).key == "1x?:unnamed"
+
+    def test_3view_height_stack_key_unchanged(self):
+        layout = ViewLayout(n_views=3, order=("exterior_1", "exterior_2", "wrist"))
+        assert layout.key == "3x?:exterior_1+exterior_2+wrist"
+
+    def test_tokens_per_view_still_appears_in_the_key(self):
+        assert ViewLayout(n_views=1, tokens_per_view=64).key == "1x64:unnamed"
+
+    def test_non_height_packing_gets_a_different_key(self):
+        # A different physical packing is different geometry -- it must not
+        # collide with an old-format key for the same n_views/order.
+        plain = ViewLayout(n_views=2, order=("a", "b"))
+        width = ViewLayout(n_views=2, order=("a", "b"), packing="width")
+        assert plain.key != width.key
+        assert plain.key == "2x?:a+b"
+        assert width.key == "2x?:a+b:width:2p:0,1"
+
+    def test_panel_subset_gets_a_different_key(self):
+        plain = ViewLayout(n_views=2, order=("a", "b"))
+        subset = ViewLayout(n_views=2, order=("a", "b"), packing="width",
+                            n_panels=3, panels=(0, 1))
+        assert plain.key != subset.key
+
+
+class TestViewLayoutPacking:
+    def test_default_packing_is_height_for_backward_compatibility(self):
+        assert ViewLayout(n_views=3).packing == "height"
+
+    def test_width_stack_crops_columns(self):
+        layout = ViewLayout(n_views=3, packing="width")
+        assert layout.view_crops(frame_width=960, frame_height=192) == [
+            (0, 192, 0, 320), (0, 192, 320, 640), (0, 192, 640, 960)]
+
+    def test_height_stack_crops_rows(self):
+        layout = ViewLayout(n_views=3)
+        assert layout.view_crops(frame_width=320, frame_height=576) == [
+            (0, 192, 0, 320), (192, 384, 0, 320), (384, 576, 0, 320)]
+
+    def test_grid2x2_crops_quadrants(self):
+        layout = ViewLayout(n_views=4, packing="grid2x2", n_panels=4)
+        assert layout.view_crops(frame_width=768, frame_height=432) == [
+            (0, 216, 0, 384), (0, 216, 384, 768),
+            (216, 432, 0, 384), (216, 432, 384, 768)]
+
+    def test_grid2x2_requires_exactly_4_panels(self):
+        with pytest.raises(ValueError, match="4 physical panels"):
+            ViewLayout(n_views=3, packing="grid2x2", n_panels=3)
+
+    def test_unknown_packing_rejected(self):
+        with pytest.raises(ValueError):
+            ViewLayout(n_views=1, packing="depth")  # type: ignore[arg-type]
+
+
+class TestViewLayoutPanelSubset:
+    """Selecting a subset of panels is a first-class layout property, not
+    caller-side slicing -- the ctrlworld case (columns 0:320 and 320:640,
+    wrist panel dropped)."""
+
+    def test_ctrlworld_style_subset_drops_the_third_panel(self):
+        layout = ViewLayout(n_views=2, order=("exterior_1", "exterior_2"),
+                            packing="width", n_panels=3, panels=(0, 1))
+        assert layout.panel_indices == (0, 1)
+        assert layout.is_subset
+        assert layout.view_crops(frame_width=960, frame_height=192) == [
+            (0, 192, 0, 320), (0, 192, 320, 640)]
+
+    def test_no_subset_is_not_flagged_as_one(self):
+        assert not ViewLayout(n_views=3).is_subset
+        assert not ViewLayout(n_views=1).is_subset
+
+    def test_panels_must_have_one_entry_per_view(self):
+        with pytest.raises(ValueError, match="panels has"):
+            ViewLayout(n_views=2, n_panels=3, panels=(0, 1, 2))
+
+    def test_panels_must_be_distinct(self):
+        with pytest.raises(ValueError, match="distinct"):
+            ViewLayout(n_views=2, n_panels=3, panels=(0, 0))
+
+    def test_panel_index_out_of_range_rejected(self):
+        with pytest.raises(ValueError, match="out of range"):
+            ViewLayout(n_views=2, n_panels=3, panels=(0, 5))
+
+    def test_mismatched_panel_and_view_count_without_explicit_panels_rejected(self):
+        # n_panels != n_views but no `panels` given -- must say explicitly
+        # which panels map to which views, never guess an implicit mapping.
+        with pytest.raises(ValueError, match="no `panels` subset"):
+            ViewLayout(n_views=2, n_panels=3)
+
+
+class TestViewLayoutRefusesRatherThanGuesses:
+    """The check that would have caught the real ctrlworld 960x192 bug: a
+    3-view HEIGHT layout fed a WIDTH-stacked frame divides evenly
+    (192 % 3 == 0) but produces implausible 960x64 panels -- this must raise,
+    never silently slice three meaningless bands."""
+
+    def test_width_stacked_960x192_declared_as_height_stack_raises(self):
+        layout = ViewLayout(n_views=3, order=("exterior_1", "exterior_2", "wrist"))
+        with pytest.raises(ValueError, match="aspect"):
+            layout.view_crops(frame_width=960, frame_height=192)
+
+    def test_same_frame_with_the_correct_width_packing_does_not_raise(self):
+        layout = ViewLayout(n_views=3, order=("exterior_1", "exterior_2", "wrist"),
+                            packing="width")
+        crops = layout.view_crops(frame_width=960, frame_height=192)
+        assert len(crops) == 3
+
+    def test_indivisible_height_stack_still_raises(self):
+        layout = ViewLayout(n_views=3)
+        with pytest.raises(ValueError):
+            layout.view_crops(frame_width=320, frame_height=577)
+
+    def test_indivisible_width_stack_still_raises(self):
+        layout = ViewLayout(n_views=3, packing="width")
+        with pytest.raises(ValueError):
+            layout.view_crops(frame_width=961, frame_height=192)
+
+    def test_single_view_is_never_subject_to_the_aspect_guard(self):
+        # n_panels=1 -- there's no packing ambiguity to guard against; a
+        # single camera's own frame can legitimately be any aspect ratio.
+        layout = ViewLayout(n_views=1)
+        assert layout.view_crops(frame_width=960, frame_height=64) == [(0, 64, 0, 960)]
+
+
+class TestViewLayoutAssertTokensAllModes:
+    """``assert_tokens`` only depends on n_views/tokens_per_view -- pin that
+    it keeps working for every packing mode, not just the default."""
+
+    @pytest.mark.parametrize("packing,n_panels,panels", [
+        ("height", None, ()),
+        ("width", None, ()),
+        ("grid2x2", 4, ()),
+    ])
+    def test_assert_tokens_unaffected_by_packing(self, packing, n_panels, panels):
+        n_views = 4 if packing == "grid2x2" else 3
+        layout = ViewLayout(n_views=n_views, tokens_per_view=5, packing=packing,
+                            n_panels=n_panels, panels=panels)
+        layout.assert_tokens(n_views * 5)  # does not raise
+        with pytest.raises(ValueError):
+            layout.assert_tokens(n_views * 5 + 1)

@@ -62,11 +62,17 @@ class MeanSpeed(SafeMetric):
     spec = MetricSpec(
         key="mean_speed_mps", units="m/s", dt_exponent=1,
         direction="lower_better", requires=frozenset({"P"}), min_frames=2,
-        description="Mean over frames and keypoints of ||dP/dt|| (m/s).")
+        perframe=True,
+        description="Mean over frames and keypoints of ||dP/dt|| (m/s). "
+                     "perframe=True: per-frame mean-over-keypoints speed "
+                     "trace. One finite difference drops 1 frame, from the "
+                     "front (see bench/traces.py's ALIGNMENTS['front']): "
+                     "trace length == n_frames - 1, trace[0] is frame 1.")
 
     def _compute(self, ctx: MetricContext) -> MetricValue:
         s = torch.linalg.norm(_velocity(ctx.P, ctx.dt), dim=-1)
-        return self._ok(s.mean())
+        perframe = s.mean(dim=-1).reshape(-1).detach().cpu().numpy()
+        return self._ok(s.mean(), perframe=perframe)
 
 
 class MeanAccel(SafeMetric):
@@ -75,11 +81,17 @@ class MeanAccel(SafeMetric):
     spec = MetricSpec(
         key="mean_accel_mps2", units="m/s^2", dt_exponent=2,
         direction="lower_better", requires=frozenset({"P"}), min_frames=3,
-        description="Mean over frames and keypoints of ||d^2P/dt^2|| (m/s^2).")
+        perframe=True,
+        description="Mean over frames and keypoints of ||d^2P/dt^2|| (m/s^2). "
+                     "perframe=True: per-frame mean-over-keypoints "
+                     "acceleration trace. Two finite differences drop 2 "
+                     "frames, from the front: trace length == n_frames - 2, "
+                     "trace[0] is frame 2.")
 
     def _compute(self, ctx: MetricContext) -> MetricValue:
         a = torch.linalg.norm(_acceleration(ctx.P, ctx.dt), dim=-1)
-        return self._ok(a.mean())
+        perframe = a.mean(dim=-1).reshape(-1).detach().cpu().numpy()
+        return self._ok(a.mean(), perframe=perframe)
 
 
 class MaxAccel(SafeMetric):
@@ -109,7 +121,10 @@ class MeanJerk(SafeMetric):
         key="mean_jerk_mps3", units="m/s^3", dt_exponent=3,
         direction="lower_better", requires=frozenset({"P"}), min_frames=4,
         perframe=True,
-        description="Mean over frames and keypoints of ||d^3P/dt^3|| (m/s^3).")
+        description="Mean over frames and keypoints of ||d^3P/dt^3|| (m/s^3). "
+                     "Three finite differences drop 3 frames, from the "
+                     "front: trace length == n_frames - 3, trace[0] is "
+                     "frame 3.")
 
     def _compute(self, ctx: MetricContext) -> MetricValue:
         j = torch.linalg.norm(_jerk(ctx.P, ctx.dt), dim=-1)        # (B,T-3,K)
@@ -139,18 +154,28 @@ class AccelViolationFrac(SafeMetric):
         self.spec = MetricSpec(
             key="accel_violation_frac", units="fraction", dt_exponent=None,
             direction="lower_better", requires=frozenset({"P"}), min_frames=3,
+            perframe=True,
             description=(
                 "Fraction of (frame,keypoint) pairs whose acceleration "
                 f"magnitude exceeds accel_bound={accel_bound} m/s^2 (fixed "
                 "physical constant, not scaled by dt). dt_exponent=None: "
                 "this is a threshold crossing, not a power law -- it is the "
                 "metric most sensitive to a wrong dt (measured 0.000 -> "
-                "0.3875 under a 2x dt error)."))
+                "0.3875 under a 2x dt error). perframe=True: per-frame "
+                "fraction of KEYPOINTS violating at that frame (mean over "
+                "the keypoint axis only) -- a continuous [0,1] trace whose "
+                "own mean over frames reproduces the scalar exactly (the "
+                "scalar means over frame AND keypoint jointly; this is that "
+                "same reduction split into two steps so time is visible). "
+                "Two finite differences drop 2 frames, from the front: "
+                "trace length == n_frames - 2, trace[0] is frame 2."))
 
     def _compute(self, ctx: MetricContext) -> MetricValue:
         a = torch.linalg.norm(_acceleration(ctx.P, ctx.dt), dim=-1)
         frac = (a > self.accel_bound).float().mean()
-        return self._ok(frac)
+        perframe = (a > self.accel_bound).float().mean(
+            dim=-1).reshape(-1).detach().cpu().numpy()
+        return self._ok(frac, perframe=perframe)
 
 
 register(MeanSpeed())

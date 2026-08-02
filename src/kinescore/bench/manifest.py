@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -32,7 +33,7 @@ from kinescore.video.probe import ffprobe, resolve_timebase
 
 __all__ = [
     "ROW_KEYS", "DiscoveredClip", "SourcePlugin", "build_manifest",
-    "verify_manifest", "save_manifest", "load_manifest",
+    "verify_manifest", "save_manifest", "load_manifest", "autodetect_manifest",
 ]
 
 #: Manifest row column order (also the parquet/JSON column order).
@@ -184,8 +185,8 @@ def build_manifest(plugins: Sequence[SourcePlugin], *,
     return rows
 
 
-def verify_manifest(rows: list[dict]) -> dict:
-    """Assert paired gt/pred clips share width, height and codec.
+def verify_manifest(rows: list[dict], *, dt_rel_tol: float = 0.01) -> dict:
+    """Assert paired gt/pred clips share width, height, codec and ``dt``.
 
     Generalised from the source, which only checked pairs in the
     ``"dreamdojo"`` family by name. Any ``pair_key`` group containing both a
@@ -196,6 +197,29 @@ def verify_manifest(rows: list[dict]) -> dict:
     ``codec`` column the manifest row already carries (see :data:`ROW_KEYS`),
     instead of re-probing both files as the source had to (its row didn't
     carry codec).
+
+    ``dt`` is checked alongside ``w``/``h``/``codec`` for the same reason
+    those are checked: the whole point of a paired gt/pred comparison is that
+    frame rate cancels *within the pair* (see ``docs/BENCHMARKING.md``,
+    layer 1, "paired") -- a pair whose two members were probed at different
+    frame rates is not a valid instance of that cancellation, and every
+    derivative metric scored on it (speed, accel, jerk, ...) would be
+    comparing two different physical quantities. This is therefore a **hard**
+    mismatch, exactly like a width/height/codec disagreement, not a warning:
+    it flips ``ok`` to ``False`` and is reported in ``mismatches``, in the
+    same shape as the existing fields (``dt_ok``, ``gt_dt``, ``pred_dt``,
+    mirroring ``wh_ok``/``gt_wh``/``pred_wh`` and ``codec_ok``/``gt_codec``/
+    ``pred_codec``).
+
+    Parameters
+    ----------
+    dt_rel_tol:
+        Relative tolerance for the ``dt`` comparison (``math.isclose``'s
+        ``rel_tol``). ``0.01`` (1%) by default, matching
+        ``video/probe.py::resolve_timebase``'s ``probe_tolerance`` default --
+        enough to absorb container fps rounding (e.g. 29.97 vs 30 both
+        resolving to "the same" nominal rate) without passing a genuine
+        cross-rate pair (e.g. 10 fps vs 16 fps, a 60% relative difference).
 
     Returns
     -------
@@ -221,12 +245,14 @@ def verify_manifest(rows: list[dict]) -> dict:
         pred = next(r for r in rs if r["role"] == "pred")
         wh_ok = (gt["w"], gt["h"]) == (pred["w"], pred["h"])
         codec_ok = gt.get("codec") == pred.get("codec")
-        if not (wh_ok and codec_ok):
+        dt_ok = math.isclose(gt["dt"], pred["dt"], rel_tol=dt_rel_tol)
+        if not (wh_ok and codec_ok and dt_ok):
             mismatches.append({
                 "pair_key": pair_key,
                 "gt_wh": [gt["w"], gt["h"]], "pred_wh": [pred["w"], pred["h"]],
                 "gt_codec": gt.get("codec"), "pred_codec": pred.get("codec"),
-                "wh_ok": wh_ok, "codec_ok": codec_ok,
+                "gt_dt": gt["dt"], "pred_dt": pred["dt"],
+                "wh_ok": wh_ok, "codec_ok": codec_ok, "dt_ok": dt_ok,
             })
 
     n_rows_by_family: dict[str, int] = {}
@@ -287,3 +313,41 @@ def load_manifest(path: str) -> list[dict]:
         return pd.read_parquet(path).to_dict("records")
     with open(path) as f:
         return json.load(f)
+
+
+def autodetect_manifest(dir_: str, *, required: bool = True) -> str | None:
+    """Find ``bench_manifest.parquet``/``.json`` (or the first ``*manifest*``) under ``dir_``.
+
+    One function, two contracts, chosen by ``required`` -- this used to be
+    three near-identical copies (``cli/cmd_aggregate.py``, ``cli/cmd_rank.py``
+    byte-identical and raising; ``cli/cmd_export.py``'s returning ``None``
+    instead). The right contract depends on what the caller can do without a
+    manifest:
+
+    * ``required=True`` (default) -- raises :class:`FileNotFoundError`. Use
+      this when the manifest is load-bearing (``kinescore aggregate``/
+      ``kinescore rank`` immediately join it against ``results.jsonl``; there
+      is nothing useful to do without it).
+    * ``required=False`` -- returns ``None``. Use this when the caller has a
+      documented degraded path (``kinescore export`` writes CSVs with blank
+      episode/role identity and prints a warning rather than failing outright
+      -- see :mod:`kinescore.bench.csv_export`).
+
+    Making the caller pass ``required=`` explicitly is the point: the
+    divergence is a one-word decision at the call site, not something a
+    reader has to diff three copies of the same function to discover.
+    """
+    import glob
+
+    for name in ("bench_manifest.parquet", "bench_manifest.json"):
+        candidate = os.path.join(dir_, name)
+        if os.path.exists(candidate):
+            return candidate
+    matches = sorted(glob.glob(os.path.join(dir_, "*manifest*")))
+    if matches:
+        return matches[0]
+    if required:
+        raise FileNotFoundError(
+            f"no bench_manifest.parquet/.json found under {dir_!r}; pass "
+            f"--manifest explicitly")
+    return None

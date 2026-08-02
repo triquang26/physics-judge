@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 
+NAME = "score"
 HELP = "score clips against a manifest with a trained reader"
 
 
@@ -37,6 +38,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "(0 = every probed frame)")
     parser.add_argument("--quiet", action="store_true",
                         help="don't print one line per scored clip")
+    parser.add_argument("--traces", action="store_true",
+                        help="also write per-frame traces (jerk-over-time, "
+                             "per-frame rigidity deviation, ...) to "
+                             "<out>/traces.npz + <out>/traces_index.jsonl "
+                             "(see kinescore.bench.traces). Default off: "
+                             "results.jsonl is identical either way, this "
+                             "only adds the sidecar files")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -69,11 +77,21 @@ def run(args: argparse.Namespace) -> int:
     if scorer.reader.limit_semantics == "raw_rad":
         print(f"[score] reader {scorer.reader.reader_id!r} is raw_rad: "
               f"limit_violation_frac/limit_excess_rad are OBSERVABLE for this "
-              f"run (see docs/PROVENANCE.md D7). No sigma-gate is applied by "
+              f"run (see legacy_docs/PROVENANCE.md D7). No sigma-gate is applied by "
               f"this command -- every frame is scored; pass a `gate=` to "
               f"kinescore.core.scorer.Scorer yourself for a gated run.")
 
     results_path = os.path.join(args.out, "results.jsonl")
+
+    trace_store = None
+    if args.traces:
+        from kinescore.bench.traces import TraceStore
+
+        trace_store = TraceStore(os.path.join(args.out, "traces.npz"))
+        quantity_keys = scorer.suite.quantity_keys
+        print(f"[score] --traces: writing per-frame arrays for "
+              f"{len(quantity_keys)} metric(s) ({', '.join(quantity_keys)}) "
+              f"to {trace_store.path!r} + {trace_store.index_path!r}")
 
     def _progress(row: dict, status: str) -> None:
         if not args.quiet:
@@ -81,7 +99,8 @@ def run(args: argparse.Namespace) -> int:
 
     summary = run_bench(rows, scorer, results_path, resume=args.resume,
                         force=args.force, max_frames=args.max_frames,
-                        view_layout=view_layout, progress=_progress)
+                        view_layout=view_layout, progress=_progress,
+                        trace_store=trace_store)
     print(f"[score] done: {summary}")
 
     dt_sources = sorted({r.get("dt_source") for r in rows})

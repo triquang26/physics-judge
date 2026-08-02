@@ -37,17 +37,17 @@ Three design decisions this file makes, each fixing a defect the source had:
 """
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import torch
 
-from kinescore.core.robot import Capability, rigid_bone_mask
+from kinescore.core.robot import Capability
+from kinescore.robots.base import structural_rigid_bone_mask, warn_dropped_bones
 from kinescore.robots.franka.constants import (
+    ACTUATED_LINKS,
     PANDA_ARM_JOINTS,
     PANDA_FINGER_JOINTS,
     PANDA_FINGER_MAX,
-    ACTUATED_LINKS,
     RIGID_BONE_MIN_M,
 )
 from kinescore.robots.franka.fk import FrankaFK
@@ -112,7 +112,8 @@ class FrankaSpec:
         self.bone_pairs = self.fk.bone_pairs.clone()
         self.bone_lengths = self.fk.bone_lengths.clone()
         mask = self._rigid_bone_mask()
-        self._warn_dropped_bones(mask)
+        warn_dropped_bones("FrankaSpec", self.keypoint_links, self.bone_pairs,
+                           self.bone_lengths, mask)
         self.rigid_bone_pairs = self.bone_pairs[mask]
         self.rigid_bone_lengths = self.bone_lengths[mask]
 
@@ -125,54 +126,15 @@ class FrankaSpec:
     def _rigid_bone_mask(self) -> torch.Tensor:
         """Select bones that actually measure arm rigidity.
 
-        Two independent rules, both of which a bone must pass:
-
-        1. **Structural** -- neither endpoint is in
-           :data:`~kinescore.robots.franka.constants.ACTUATED_LINKS`. A bone
-           ending on a gripper finger changes length because the gripper opened,
-           not because the arm deformed. This is read off the kinematic chain
-           and transfers to any robot.
-        2. **Degenerate-length** -- the rest length exceeds
-           :data:`~kinescore.core.robot.DEGENERATE_BONE_M`. A bone whose
-           endpoints coincide at rest carries no rigidity information whatever
-           actuates it, and would divide by ~0.
-
-        Rule 1 is primary. Rule 2 exists because it is cheap and catches a
-        degenerate bone a future robot plugin might introduce without noticing.
-        On the Panda, rule 1 alone drops bones 4, 5 and 6 and rule 2 alone would
-        drop only bone 5 -- the intersection is what makes the exclusion
-        principled rather than a threshold tuned to one robot.
+        Delegates to :func:`kinescore.robots.base.structural_rigid_bone_mask`
+        -- see that function's docstring for the two-rule pattern (D9). On the
+        Panda, rule 1 alone drops bones 4, 5 and 6 and rule 2 alone would drop
+        only bone 5 -- the intersection is what makes the exclusion principled
+        rather than a threshold tuned to one robot.
         """
-        actuated = torch.tensor(
-            [self.keypoint_links[i] in ACTUATED_LINKS
-             or self.keypoint_links[j] in ACTUATED_LINKS
-             for i, j in self.bone_pairs.tolist()], dtype=torch.bool)
-        long_enough = rigid_bone_mask(self.bone_lengths,
-                                      min_length_m=RIGID_BONE_MIN_M)
-        return (~actuated) & long_enough
-
-    def _warn_dropped_bones(self, mask: torch.Tensor) -> None:
-        """Warn once, by name, for every bone :attr:`rigid_bone_pairs` drops.
-
-        Silent filtering here would be exactly the kind of thing that makes a
-        downstream "why is my rigidity number different from the paper's"
-        question take an afternoon instead of reading one warning.
-        """
-        dropped = [
-            f"{self.keypoint_links[i]}->{self.keypoint_links[j]} "
-            f"(rest length {self.bone_lengths[k].item():.4f} m)"
-            for k, (i, j) in enumerate(self.bone_pairs.tolist())
-            if not mask[k]
-        ]
-        if dropped:
-            warnings.warn(
-                "FrankaSpec: excluded from rigid_bone_pairs (endpoint is a "
-                "gripper-actuated link, or the bone is degenerate at rest -- "
-                "either way its length tracks actuation, not arm rigidity; see "
-                "kinescore.robots.franka.constants.ACTUATED_LINKS): "
-                + "; ".join(dropped),
-                stacklevel=3,
-            )
+        return structural_rigid_bone_mask(
+            self.keypoint_links, self.bone_pairs, self.bone_lengths,
+            ACTUATED_LINKS, min_length_m=RIGID_BONE_MIN_M)
 
     # ------------------------------------------------------------------ #
     # RobotSpec protocol

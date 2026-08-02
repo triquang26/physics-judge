@@ -25,47 +25,68 @@ probed with `ffprobe` and `dt = 1/fps`. Anything that can write a video can be
 scored — Cosmos, DreamGen, Ctrl-World, your own model — without kinescore
 knowing how it generates. There is no `diffusers` dependency, not even optional.
 
-## Quickstart
+## Install
 
 ```bash
 uv venv --python 3.10 .venv && source .venv/bin/activate
-uv pip install "torch==2.7.1" --index-url https://download.pytorch.org/whl/cu126
-uv pip install -e ".[dino,video,bench,dev]" -c constraints.txt
-cp .env.example .env      # fill in KINESCORE_ASSETS etc.
-
-kinescore manifest  --root  $KINESCORE_DATA_ROOT --out out/manifest.parquet
-kinescore reference build   --manifest out/manifest.parquet --real-only --out out/reference.pt
-kinescore score     --manifest out/manifest.parquet --robot franka --reader $CKPT --out out/
-kinescore aggregate out/ && kinescore report out/
+uv pip install -e ".[dino,video,bench,dev]"
+cp .env.example .env      # fill in KINESCORE_ASSETS, KINESCORE_DATA_ROOT, etc.
+kinescore doctor          # what's present, what's missing, no network needed
 ```
+
+`torch` (`>=2.5,<3`) is a base dependency and pulled in automatically; install
+a CUDA build first (`uv pip install torch --index-url
+https://download.pytorch.org/whl/<cuXXX>`) before the line above if you need
+GPU support pinned to a specific CUDA version.
+
+## Quickstart
+
+```bash
+kinescore manifest  --root  $KINESCORE_DATA_ROOT --out out/manifest.parquet
+kinescore reference build   --manifest out/manifest.parquet --role gt --role real --out out/reference.pt
+kinescore score     --manifest out/manifest.parquet --robot franka_panda --reader $CKPT --out out/
+kinescore aggregate out/ && kinescore report out/stats.json
+```
+
+This is the shortest path from "clips on disk" to "an HTML report." For the
+full pipeline (benchmark matrix config, ingest/verify, CSV export per cell,
+per-frame traces, the frame-rate rules that make a comparison valid) see
+[docs/DATA_PREP.md](docs/DATA_PREP.md) and
+[docs/BENCHMARKING.md](docs/BENCHMARKING.md). To train a reader for a new
+robot or dataset, see [docs/TRAINING.md](docs/TRAINING.md).
 
 ## Supported robots
 
-| Robot | DOF | Cameras | Balance | Pose reader | `limit_semantics` | Notes |
+| Robot | Registry key | DOF predicted | Cameras | Balance | Checkpoint | Status |
 |---|---|---|---|---|---|---|
-| Franka Panda | 7 + gripper | 1 or 3 (multiview) | n/a — bolted down | `AttentivePoseHead` → `SquashedPoseReader` | `squashed` | DROID-style exterior + wrist views |
-| Fourier GR-1 | 17 + 12 hand | 1 ego-view | yes — feet, CoM margin | `ReadoutV2Head` → `HeteroscedasticPoseReader` (the production/page path) | `raw_rad` | bimanual humanoid |
+| Fourier GR-1 | `fourier_gr1` | 17 (arms + waist; legs/hands logged, not predicted) | 1 ego-view | yes — feet, CoM margin | `humanoid.pt` | **accepted**, val 19.19mm |
+| Airbot MMK2 | `airbot_mmk2` | 12 (bimanual arms) | 1 (multi-cam data prepared, not yet cached) | n/a — bolted down | `airbot_mmk2_rawrad.pt` | **accepted**, val 19.52mm |
+| Franka Panda | `franka_panda` | 7 + gripper (aux) | 1 or 3 (multiview) | n/a — bolted down | `single_arm_rawrad.pt` | **rejected**, val 162.10mm — retrain in progress, see [docs/TRAINING.md](docs/TRAINING.md) |
+| ALOHA bimanual | `aloha_bimanual` | 12 (bimanual arms; grippers via `aux`) | 4 | n/a — table-mounted | none trained yet | robot registered, not yet scored |
+| `Synthetic2R` | `synthetic_2r` | 2 | — | n/a | closed-form, no checkpoint | test/reference fixture only |
 
-The two robots use two **different** reader families on purpose, not a
-default-plus-exception: Franka's squashed head is valid-by-construction (see
-below), GR-1's heteroscedastic head is not, and `--reader` auto-routes to the
-matching one from the checkpoint itself (`kinescore.readers.checkpoint.load_reader`)
-— see [`docs/PROVENANCE.md`](docs/PROVENANCE.md) D10. Adding a third robot is
-implementing one protocol: see [`docs/ADDING_A_ROBOT.md`](docs/ADDING_A_ROBOT.md).
+Every real robot uses the **same** reader family
+(`ReadoutV2Head` → `HeteroscedasticPoseReader`, `limit_semantics="raw_rad"`) —
+an earlier "squashed head" family that could never make joint-limit
+violations observable was removed entirely, not kept as a second option; see
+[legacy_docs/PROVENANCE.md](legacy_docs/PROVENANCE.md)'s "D7 addendum".
+`--reader` auto-routes from the checkpoint's own `cfg`
+(`kinescore.readers.loader.load_reader`). Adding a robot is implementing one
+protocol — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#adding-a-robot).
 
 ## What each metric does *not* detect
 
 A benchmark is only as honest as its caveats. Full table in
-[`docs/METRICS.md`](docs/METRICS.md); the traps worth knowing before you read a
+[docs/METRICS.md](docs/METRICS.md); the traps worth knowing before you read a
 number:
 
 | Metric | Measures | Does **not** detect |
 |---|---|---|
-| Rigidity residual / wobble | link lengths staying constant | anything about *speed*; and under the full bone set it is contaminated by gripper actuation (see D9) |
-| Mean jerk | motion smoothness | a smoothly-executed but impossible motion |
-| Joint-limit violation | joints driven past their stops | **nothing at all under a squashed-head reader** (Franka) — it is structurally `0` (see D7), and kinescore reports `null`, never `0`. **Observable** under a `raw_rad` reader (GR-1) — the clamp overshoot on the unsquashed reading *is* the signal |
-| Accel violation fraction | accelerations over a fixed bound | it uses an *absolute* threshold, so it is the metric most sensitive to a wrong frame rate |
-| Effort proxy | rough torque demand | real torque — there is no inertia model; comparative only |
+| Rigidity residual / wobble | link lengths staying constant | anything about *speed*; and under the full (unfiltered) bone set it can be contaminated by gripper actuation |
+| Mean jerk | motion smoothness | a smoothly-executed but kinematically impossible motion |
+| Joint-limit violation | joints driven past their stops | it needs a `raw_rad` reader (every checkpoint in the table above is one) — a hypothetical squashed reader would report a structural `0` here, and kinescore would report `null`, never a fabricated `0` |
+| Accel/vel/no-teleport violation fraction | a fixed physical bound crossed | it thresholds a frame-rate-dependent quantity against an *absolute* constant, making it the metric group most sensitive to a wrong frame rate |
+| Effort proxy | rough torque demand | real torque — there is no inertia model; comparative only, and `NaN` for a robot whose URDF declares no effort limits (GR-1) |
 | PIS | aggregate deviation from real motion | comparability across different suites — only valid within one `suite_id` |
 | KFD | distributional distance from real motion | anything across frame rates — it is not scale-invariant |
 
@@ -79,10 +100,10 @@ terms, a rigidity metric contaminated by gripper opening, and a joint-limit
 metric that was structurally incapable of firing.
 
 Every one of those is fixed, and every fix is recorded in
-[`docs/PROVENANCE.md`](docs/PROVENANCE.md) with the old behaviour, the new
-behaviour, the rationale, and the test that pins it. Where a fix changes a
-number, both the legacy and corrected values are kept as paired fixtures, so a
-reviewer can see exactly which published numbers moved and why.
+[legacy_docs/PROVENANCE.md](legacy_docs/PROVENANCE.md) with the old behaviour,
+the new behaviour, the rationale, and the test that pins it. Where a fix
+changes a number, both the legacy and corrected values are kept as paired
+fixtures, so a reviewer can see exactly which published numbers moved and why.
 
 ## Testing
 
@@ -101,12 +122,12 @@ derivative unchanged, and every registered metric must numerically match the
 
 | | |
 |---|---|
+| [`docs/DATA_PREP.md`](docs/DATA_PREP.md) | where data goes, the mandatory format per cell, `ingest`/`verify`, training-input conversion |
+| [`docs/TRAINING.md`](docs/TRAINING.md) | per robot: cache → train → the mm acceptance gate |
+| [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) | config → run → CSV/traces → how to read the numbers, the frame-rate rules |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | the OOP map; how to add a robot / metric / data source |
 | [`docs/METRICS.md`](docs/METRICS.md) | every metric: formula, units, `dt` exponent, what it misses |
-| [`docs/PROVENANCE.md`](docs/PROVENANCE.md) | where each file came from; every intentional behaviour change |
-| [`docs/MODIFYING.md`](docs/MODIFYING.md) | common changes → which files, which tests, which docs |
-| [`docs/ADDING_A_ROBOT.md`](docs/ADDING_A_ROBOT.md) | the `RobotSpec` protocol, walked through |
-| [`docs/ADDING_A_METRIC.md`](docs/ADDING_A_METRIC.md) | the `Metric` protocol and its mandatory declarations |
-| [`docs/SCHEMA.md`](docs/SCHEMA.md) | the canonical result record |
+| [`legacy_docs/`](legacy_docs/) | decision record — why things are the way they are, not how to use them today |
 
 ## Scope, honestly
 

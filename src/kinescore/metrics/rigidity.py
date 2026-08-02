@@ -144,7 +144,93 @@ class RigidityWobble(SafeMetric):
         return self._ok(wobble)
 
 
+class RigidityWorstBone(SafeMetric):
+    """Worst-bone deviation from its own median length (mm) -- the *published* ruler.
+
+    Why this exists alongside the two metrics above
+    ----------------------------------------------
+    ``RigidityResidual`` / ``RigidityWobble`` are faithful ports of the
+    source's ``rigidity_residual_mm`` / ``rigidity_wobble_mm``. But the
+    rigidity figure on the project page (real 4.3 mm vs generated 5.9 mm,
+    separation 0.674, worst clips rubber-banding 20-34 mm) was **not**
+    produced by either of them -- it came from a *different* source function,
+    ``models.physics.feasibility.rigidity_field``, which differs in two ways
+    that both matter:
+
+    1. **Reference length.** ``rigidity_field`` measures each bone against
+       **its own temporal median**, not against the URDF rest length. A
+       reader with a constant per-bone localisation bias (it draws one link
+       2 mm long in *every* frame) reads 2 mm of "rigidity error" under
+       ``RigidityResidual`` while being perfectly rigid. Against the bone's
+       own median that bias cancels exactly, leaving only real length change.
+    2. **Reduction over bones.** ``rigidity_field`` takes ``amax`` over bones
+       -- the single worst-stretching link -- where both metrics above take a
+       ``mean``. The failure mode this ruler exists to catch is *one* limb
+       rubber-banding; averaging it against every well-behaved bone in the
+       chain dilutes exactly the signal.
+
+    Measured consequence of (2) on this benchmark's GR-1 dreamdojo cell
+    (n=659 paired episodes): the mean-reduced ``rigidity_residual_mm``
+    separates generated from real in **56.6%** of episodes -- a coin flip --
+    with a median paired delta of **+0.013 mm**. The published amax-reduced
+    ruler reports a clear signal on comparable data. The mean is not a
+    conservative version of the max here; it is a different, much blunter
+    instrument.
+
+    Both remain registered: the ports reproduce prior numbers, this one
+    reproduces the published ruler's *semantics*. Neither is "the" rigidity
+    metric -- they answer different questions, and a report should say which
+    it used.
+
+    Parameters
+    ----------
+    bone_set:
+        Same meaning as :class:`RigidityResidual`. ``"rigid"`` (default)
+        excludes gripper-actuated and degenerate bones (D9) -- important
+        here, since ``amax`` would otherwise be *dominated* by a gripper
+        finger opening rather than merely biased by it.
+    """
+
+    def __init__(self, bone_set: str = "rigid") -> None:
+        if bone_set not in _BONE_SETS:
+            raise ValueError(f"bone_set must be one of {_BONE_SETS}, got {bone_set!r}")
+        self.bone_set = bone_set
+        key = ("rigidity_worst_bone_mm" if bone_set == "rigid"
+               else "rigidity_worst_bone_all_mm")
+        self.spec = MetricSpec(
+            key=key, units="mm", dt_exponent=0, direction="lower_better",
+            requires=frozenset({"P"}), min_frames=2, perframe=True,
+            description=(
+                "Mean over frames of the worst bone's absolute deviation from "
+                "that bone's own temporal median length "
+                f"(bone_set={bone_set!r}). Purely geometric, so dt-free. "
+                "min_frames=2: a median over a single frame equals that frame, "
+                "making the deviation identically 0 -- a fabricated 'perfectly "
+                "rigid' reading rather than a measurement. perframe=True: "
+                "emits the (B*T,) worst-bone-deviation-in-mm trace this "
+                "class's scalar reduces (`dev * 1000.0`, pre-mean) -- this IS "
+                "the page's blue curve. No frames dropped (a purely per-frame "
+                "geometric quantity): trace length == n_frames, aligned to "
+                "frame 0 (see bench/traces.py's ALIGNMENTS['full'])."))
+
+    def _compute(self, ctx: MetricContext) -> MetricValue:
+        if ctx.robot is None:
+            return MetricValue.unavailable(self.spec.key, "missing_input:robot")
+        bone_pairs, _ = _bone_geometry(ctx.robot, self.bone_set)
+        L = _bone_lengths(ctx.P, bone_pairs)                       # (B, T, n_bones)
+        med = L.median(dim=1, keepdim=True).values                 # (B, 1, n_bones)
+        dev = (L - med).abs().amax(dim=2)                          # (B, T) worst bone
+        # perframe: the exact per-frame array `dev.mean()` below reduces,
+        # scaled to mm the same way the scalar is -- computed from `dev`
+        # separately so the scalar expression itself (`dev.mean() * 1000.0`)
+        # is untouched, byte-for-byte, by this addition.
+        perframe = (dev * 1000.0).reshape(-1).detach().cpu().numpy()
+        return self._ok(dev.mean() * 1000.0, perframe=perframe)
+
+
 register(RigidityResidual(bone_set="rigid"))
 register(RigidityResidual(bone_set="all"))
 register(RigidityWobble(bone_set="rigid"))
 register(RigidityWobble(bone_set="all"))
+register(RigidityWorstBone(bone_set="rigid"))
+register(RigidityWorstBone(bone_set="all"))

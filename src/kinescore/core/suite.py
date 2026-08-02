@@ -19,11 +19,10 @@ metric never simply vanishes from a row.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
 
-from kinescore.core.metric import (Metric, MetricContext, MetricValue,
-                                   get_metric)
+from kinescore.core.metric import Metric, MetricContext, MetricValue, get_metric
 
 __all__ = ["MetricSuite", "SuiteResult"]
 
@@ -34,9 +33,9 @@ class SuiteResult:
 
     suite_id: str
     suite_name: str
-    values: Dict[str, MetricValue]
+    values: dict[str, MetricValue]
 
-    def scalars(self) -> Dict[str, Optional[float]]:
+    def scalars(self) -> dict[str, float | None]:
         """``{key: value or None}`` -- ``None`` where unavailable.
 
         ``None`` rather than ``NaN`` so JSON emits ``null`` and parquet gets a
@@ -46,12 +45,12 @@ class SuiteResult:
         return {k: (None if not v.available else v.value)
                 for k, v in self.values.items()}
 
-    def reasons(self) -> Dict[str, str]:
+    def reasons(self) -> dict[str, str]:
         """``{key: reason}`` for every unavailable metric."""
         return {k: v.reason for k, v in self.values.items()
                 if v.reason is not None}
 
-    def perframe(self) -> Dict[str, object]:
+    def perframe(self) -> dict[str, object]:
         return {k: v.perframe for k, v in self.values.items()
                 if v.perframe is not None}
 
@@ -72,9 +71,9 @@ class MetricSuite:
     """
 
     def __init__(self, name: str, metrics: Sequence[Metric | str],
-                 invariant_keys: Optional[Iterable[str]] = None) -> None:
+                 invariant_keys: Iterable[str] | None = None) -> None:
         self.name = name
-        self.metrics: List[Metric] = [
+        self.metrics: list[Metric] = [
             get_metric(m) if isinstance(m, str) else m for m in metrics]
         keys = [m.spec.key for m in self.metrics]
         dupes = {k for k in keys if keys.count(k) > 1}
@@ -121,7 +120,7 @@ class MetricSuite:
         The returned key set is exactly :attr:`output_keys`, for every clip,
         regardless of what inputs were available -- the static-schema guarantee.
         """
-        values: Dict[str, MetricValue] = {}
+        values: dict[str, MetricValue] = {}
         for metric in self.metrics:
             key = metric.spec.key
             try:
@@ -131,7 +130,7 @@ class MetricSuite:
                     key, f"error:{type(exc).__name__}:{exc}")
         return SuiteResult(self.suite_id, self.name, values)
 
-    def describe(self) -> List[dict]:
+    def describe(self) -> list[dict]:
         """Machine-readable suite description, used by ``kinescore describe``."""
         return [{
             "key": m.spec.key, "units": m.spec.units,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+NAME = "reference"
 HELP = "build a real-motion reference fingerprint from real clips"
 
 

@@ -43,7 +43,7 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -52,7 +52,7 @@ from kinescore.core.clip import ViewLayout
 __all__ = [
     "CACHE_SCHEMA_VERSION", "CacheHeader", "backbone_id", "build_backbone",
     "assert_real_joint_source", "encode_clip", "write_cache", "load_cache",
-    "precompute_cache",
+    "CacheBuilder", "precompute_cache",
 ]
 
 #: Bumped whenever the on-disk header shape changes -- see
@@ -101,7 +101,7 @@ class CacheHeader:
     schema: int
     view_layout_key: str
     n_views: int
-    tokens_per_view: Optional[int]
+    tokens_per_view: int | None
     backbone_id: str
     source_path: str
     n_frames: int
@@ -147,7 +147,7 @@ def backbone_id(backbone: Any) -> str:
 
 def build_backbone(*, dino_model: str = "dinov3_vitl16", embed_dim: int = 1024,
                    dino_input: int = 224, patch_pool: int = 2,
-                   dino_repo_dir: str = "", view_layout: ViewLayout = ViewLayout(),
+                   dino_repo_dir: str = "", view_layout: ViewLayout | None = None,
                    device: str = "cpu"):
     """Construct a frozen :class:`~kinescore.backbones.dino.FeatureBackbone`, eval mode.
 
@@ -157,6 +157,8 @@ def build_backbone(*, dino_model: str = "dinov3_vitl16", embed_dim: int = 1024,
     """
     from kinescore.backbones.dino import FeatureBackbone
 
+    if view_layout is None:
+        view_layout = ViewLayout()  # frozen dataclass -- no mutable-default hazard
     backbone = FeatureBackbone(
         dino_model=dino_model, dino_repo_dir=dino_repo_dir, embed_dim=embed_dim,
         dino_input=dino_input, patch_pool=patch_pool, view_layout=view_layout)
@@ -196,7 +198,8 @@ def assert_real_joint_source(annotation_path: str) -> dict:
 
 def encode_clip(backbone: Any, clip_path: str, *, view_layout: ViewLayout,
                 max_frames: int = 0, device: str = "cpu",
-                fps_arg: Optional[float] = None, dt_arg: Optional[float] = None):
+                fps_arg: float | None = None, dt_arg: float | None = None,
+                frame_chunk: int = 0):
     """Decode ``clip_path`` and run the frozen backbone -> ``(T, n_tokens, D)`` fp16.
 
     Parameters
@@ -215,6 +218,23 @@ def encode_clip(backbone: Any, clip_path: str, *, view_layout: ViewLayout,
         Optional cross-checked timebase override, forwarded to
         :func:`~kinescore.video.probe.resolve_timebase` -- mutually
         exclusive; see that function.
+    frame_chunk:
+        Split the episode's frames into chunks of at most this many before
+        calling ``backbone.encode`` on each, concatenating the results.
+        ``0`` (the default) passes every frame through in one call, exactly
+        the prior (unchunked) behaviour. This exists because the transformer
+        backbone's self-attention is quadratic in *tokens per frame*
+        (``dino_input=768`` gives ~2300 tokens/frame for DINOv3-L, versus
+        ~200 at the historical default of 224), so a long episode (DROID
+        clips run up to several hundred frames) encoded in one batch at high
+        resolution can exhaust even an 80GB GPU that is otherwise nearly
+        idle -- observed OOMing a shared GPU at ``dino_input=768`` on a
+        424-frame droid_std episode. Each frame is encoded independently (no
+        batch-norm or other cross-sample coupling anywhere in
+        :class:`~kinescore.backbones.dino.FeatureBackbone`), so chunking
+        changes only memory/time, never the numeric result -- callers that
+        never hit this ceiling (the default, and every existing caller) see
+        no behaviour change at all.
 
     Returns
     -------
@@ -230,7 +250,12 @@ def encode_clip(backbone: Any, clip_path: str, *, view_layout: ViewLayout,
                             view_layout=view_layout)
     frames = load_rgb(clip, max_frames=max_frames).to(device)
     with torch.no_grad():
-        feat = backbone.encode(frames)  # (T, V, P, D)
+        if frame_chunk and frame_chunk > 0 and frames.shape[0] > frame_chunk:
+            chunks = [backbone.encode(frames[i:i + frame_chunk])
+                     for i in range(0, frames.shape[0], frame_chunk)]
+            feat = torch.cat(chunks, dim=0)  # (T, V, P, D)
+        else:
+            feat = backbone.encode(frames)  # (T, V, P, D)
     T, V, P, D = feat.shape
     return feat.reshape(T, V * P, D).half().cpu(), clip
 
@@ -247,7 +272,7 @@ def write_cache(out_path: str, feat: torch.Tensor, header: CacheHeader) -> None:
     torch.save({"feat": feat, "header": header.as_dict()}, out_path)
 
 
-def load_cache(path: str, *, expected_view_layout: Optional[ViewLayout] = None
+def load_cache(path: str, *, expected_view_layout: ViewLayout | None = None
               ) -> tuple[torch.Tensor, CacheHeader]:
     """Read a cache file written by :func:`write_cache`.
 
@@ -283,67 +308,128 @@ def load_cache(path: str, *, expected_view_layout: Optional[ViewLayout] = None
     return feat, header
 
 
+class CacheBuilder:
+    """Precompute one frozen backbone's tokens for every real-joint episode.
+
+    Holds the two things every split of one caching run shares --
+    ``backbone`` and ``view_layout`` -- as instance state, so
+    :meth:`build_split` (called once per split: val, train, ...) does not
+    repeat them at every call site. This is the class-based counterpart of
+    the free-function :func:`precompute_cache`, which now just constructs
+    one of these and calls :meth:`build_split` -- see that function's
+    docstring for why it still exists (``kinescore.cli.cmd_cache`` and
+    other pre-existing callers import the function directly).
+
+    Parameters
+    ----------
+    backbone:
+        A :class:`~kinescore.backbones.dino.FeatureBackbone` (or anything
+        with the same ``.encode(rgb) -> (N,V,P,D)`` contract), typically
+        built via :func:`build_backbone`.
+    view_layout:
+        Camera packing shared by every clip this builder will read -- see
+        :func:`encode_clip`.
+    """
+
+    def __init__(self, backbone: Any, view_layout: ViewLayout) -> None:
+        self.backbone = backbone
+        self.view_layout = view_layout
+        self._backbone_id = backbone_id(backbone)
+
+    def build_split(self, *, video_root: str, annotation_root: str, out_root: str,
+                    split: str, pattern: str = "*.mp4", limit: int = 0,
+                    device: str = "cpu", overwrite: bool = False,
+                    max_frames: int = 0, frame_chunk: int = 0,
+                    progress: ProgressCallback | None = None) -> dict[str, int]:
+        """Cache every real-joint episode of one split -> ``out_root/split/{ep}.pt``.
+
+        Layout (mirrors the source's ``{cache_root}/{split}/{ep}.pt``,
+        generalised to explicit roots -- see module docstring point 2):
+
+        * clips:       ``video_root/split/{ep}.mp4`` (matched by ``pattern``)
+        * annotations: ``annotation_root/split/{ep}.json``, with
+          ``joint_source == "real"`` (see :func:`assert_real_joint_source`)
+
+        An episode is skipped (not an error) when its annotation is missing
+        entirely -- mirroring the source's "no counterpart, nothing to align
+        against" behaviour -- but **raises** when the annotation exists with
+        the wrong ``joint_source``, since that is caching-the-wrong-thing,
+        not an absent pairing.
+
+        Parameters
+        ----------
+        frame_chunk:
+            Forwarded to :func:`encode_clip` -- ``0`` (default) is the
+            original unchunked behaviour; see that function's docstring for
+            why a long episode at a high ``dino_input`` may need this.
+
+        Returns
+        -------
+        dict
+            ``{"n_done", "n_skipped_existing", "n_skipped_no_annotation"}``.
+        """
+        video_dir = os.path.join(video_root, split)
+        files = sorted(glob.glob(os.path.join(video_dir, pattern)))
+        if limit > 0:
+            files = files[:limit]
+
+        n_done = n_skip_existing = n_skip_no_ann = 0
+        for clip_path in files:
+            ep = os.path.splitext(os.path.basename(clip_path))[0]
+            out_path = os.path.join(out_root, split, f"{ep}.pt")
+            if os.path.exists(out_path) and not overwrite:
+                n_skip_existing += 1
+                continue
+
+            ann_path = os.path.join(annotation_root, split, f"{ep}.json")
+            if not os.path.exists(ann_path):
+                n_skip_no_ann += 1
+                continue
+            assert_real_joint_source(ann_path)  # raises on a wrong joint_source
+
+            feat, clip = encode_clip(self.backbone, clip_path,
+                                     view_layout=self.view_layout,
+                                     max_frames=max_frames, device=device,
+                                     frame_chunk=frame_chunk)
+            header = CacheHeader(
+                schema=CACHE_SCHEMA_VERSION, view_layout_key=self.view_layout.key,
+                n_views=self.view_layout.n_views,
+                tokens_per_view=self.view_layout.tokens_per_view,
+                backbone_id=self._backbone_id, source_path=clip_path,
+                n_frames=int(feat.shape[0]), embed_dim=int(feat.shape[-1]))
+            write_cache(out_path, feat, header)
+            n_done += 1
+            if progress and n_done % 50 == 0:
+                progress(f"[{split}] {n_done} done, {n_skip_existing} skipped "
+                         f"(existing), {n_skip_no_ann} skipped (no annotation)")
+
+        if progress:
+            progress(f"[{split}] cache done: {n_done} written, "
+                     f"{n_skip_existing} already cached, "
+                     f"{n_skip_no_ann} had no annotation -> "
+                     f"{os.path.join(out_root, split)}")
+        return {"n_done": n_done, "n_skipped_existing": n_skip_existing,
+               "n_skipped_no_annotation": n_skip_no_ann}
+
+
 def precompute_cache(*, video_root: str, annotation_root: str, out_root: str,
                      split: str, backbone: Any, view_layout: ViewLayout,
                      pattern: str = "*.mp4", limit: int = 0, device: str = "cpu",
                      overwrite: bool = False, max_frames: int = 0,
-                     progress: Optional[ProgressCallback] = None) -> dict[str, int]:
-    """Cache every real-joint episode of one split -> ``out_root/split/{ep}.pt``.
+                     frame_chunk: int = 0,
+                     progress: ProgressCallback | None = None) -> dict[str, int]:
+    """Thin function wrapper around ``CacheBuilder(backbone, view_layout).build_split(...)``.
 
-    Layout (mirrors the source's ``{cache_root}/{split}/{ep}.pt``, generalised
-    to explicit roots -- see module docstring point 2):
-
-    * clips:       ``video_root/split/{ep}.mp4`` (matched by ``pattern``)
-    * annotations: ``annotation_root/split/{ep}.json``, with
-      ``joint_source == "real"`` (see :func:`assert_real_joint_source`)
-
-    An episode is skipped (not an error) when its annotation is missing
-    entirely -- mirroring the source's "no counterpart, nothing to align
-    against" behaviour -- but **raises** when the annotation exists with the
-    wrong ``joint_source``, since that is caching-the-wrong-thing, not an
-    absent pairing.
-
-    Returns
-    -------
-    dict
-        ``{"n_done", "n_skipped_existing", "n_skipped_no_annotation"}``.
+    Kept for existing callers (``kinescore.cli.cmd_cache``) that import this
+    function directly; behaviour and signature are unchanged from before
+    :class:`CacheBuilder` existed. New code -- especially anything caching
+    more than one split against the same backbone -- should construct a
+    :class:`CacheBuilder` once and call :meth:`~CacheBuilder.build_split` per
+    split instead, so ``backbone_id(backbone)`` is computed once rather than
+    once per split.
     """
-    video_dir = os.path.join(video_root, split)
-    files = sorted(glob.glob(os.path.join(video_dir, pattern)))
-    if limit > 0:
-        files = files[:limit]
-
-    n_done = n_skip_existing = n_skip_no_ann = 0
-    bb_id = backbone_id(backbone)
-    for clip_path in files:
-        ep = os.path.splitext(os.path.basename(clip_path))[0]
-        out_path = os.path.join(out_root, split, f"{ep}.pt")
-        if os.path.exists(out_path) and not overwrite:
-            n_skip_existing += 1
-            continue
-
-        ann_path = os.path.join(annotation_root, split, f"{ep}.json")
-        if not os.path.exists(ann_path):
-            n_skip_no_ann += 1
-            continue
-        assert_real_joint_source(ann_path)  # raises on a wrong joint_source
-
-        feat, clip = encode_clip(backbone, clip_path, view_layout=view_layout,
-                                 max_frames=max_frames, device=device)
-        header = CacheHeader(
-            schema=CACHE_SCHEMA_VERSION, view_layout_key=view_layout.key,
-            n_views=view_layout.n_views, tokens_per_view=view_layout.tokens_per_view,
-            backbone_id=bb_id, source_path=clip_path, n_frames=int(feat.shape[0]),
-            embed_dim=int(feat.shape[-1]))
-        write_cache(out_path, feat, header)
-        n_done += 1
-        if progress and n_done % 50 == 0:
-            progress(f"[{split}] {n_done} done, {n_skip_existing} skipped "
-                     f"(existing), {n_skip_no_ann} skipped (no annotation)")
-
-    if progress:
-        progress(f"[{split}] cache done: {n_done} written, "
-                 f"{n_skip_existing} already cached, "
-                 f"{n_skip_no_ann} had no annotation -> {os.path.join(out_root, split)}")
-    return {"n_done": n_done, "n_skipped_existing": n_skip_existing,
-           "n_skipped_no_annotation": n_skip_no_ann}
+    return CacheBuilder(backbone, view_layout).build_split(
+        video_root=video_root, annotation_root=annotation_root, out_root=out_root,
+        split=split, pattern=pattern, limit=limit, device=device,
+        overwrite=overwrite, max_frames=max_frames, frame_chunk=frame_chunk,
+        progress=progress)

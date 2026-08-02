@@ -2,7 +2,7 @@
 
 Compares :meth:`FrankaSpec.forward_kinematics` against
 ``tests/golden/golden_fk.npz``. That fixture is generated independently of
-this file (by whichever agent owns ``docs/PROVENANCE.md`` / the golden-data
+this file (by whichever agent owns ``legacy_docs/PROVENANCE.md`` / the golden-data
 pipeline), specifically so a regression introduced while porting
 :class:`~kinescore.robots.franka.fk.FrankaFK` shows up as a numeric mismatch
 against an independently-produced reference, rather than being invisible

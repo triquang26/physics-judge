@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -100,11 +99,11 @@ class InvarianceResult:
     """
 
     pis: float
-    per_key: Dict[str, float]
+    per_key: dict[str, float]
     n_terms: int
     n_terms_declared: int
     term_set_id: str
-    reason: Optional[str] = None
+    reason: str | None = None
     rate_mismatch: bool = False
 
 
@@ -112,7 +111,7 @@ def _clip01(x: float) -> float:
     return float(min(max(x, 0.0), 1.0))
 
 
-def _is_missing(v: Optional[float]) -> bool:
+def _is_missing(v: float | None) -> bool:
     return v is None or (isinstance(v, float) and math.isnan(v))
 
 
@@ -135,9 +134,9 @@ def _key_score(k: str, v: float, base: float, floor: float, tol: float, frac_tol
     return _clip01((v - base) / denom)
 
 
-def invariance_score(residuals: Dict[str, float], reference: RealMotionReference,
+def invariance_score(residuals: dict[str, float], reference: RealMotionReference,
                       policy: str = "strict", *, tol: float = DEFAULT_TOL,
-                      frac_tol: float = DEFAULT_FRAC_TOL, dt: Optional[float] = None,
+                      frac_tol: float = DEFAULT_FRAC_TOL, dt: float | None = None,
                       allow_rate_mismatch: bool = False,
                       legacy: bool = False) -> InvarianceResult:
     """Normalise invariant residuals against the real baseline -> PIS in ``[0,1]``.
@@ -187,8 +186,8 @@ def invariance_score(residuals: Dict[str, float], reference: RealMotionReference
 
     term_keys = reference.term_keys
     n_declared = len(term_keys)
-    per_key: Dict[str, float] = {}
-    missing: List[str] = []
+    per_key: dict[str, float] = {}
+    missing: list[str] = []
     for k in term_keys:
         v = residuals.get(k)
         if _is_missing(v):
@@ -227,7 +226,7 @@ def invariance_score(residuals: Dict[str, float], reference: RealMotionReference
                             reference.suite_id, None, rate_mismatch)
 
 
-def _invariance_score_legacy(residuals: Dict[str, float], reference: RealMotionReference,
+def _invariance_score_legacy(residuals: dict[str, float], reference: RealMotionReference,
                              tol: float, frac_tol: float) -> InvarianceResult:
     """Reproduce the source's ``RealMotionReference.invariance_score`` verbatim.
 
@@ -236,7 +235,7 @@ def _invariance_score_legacy(residuals: Dict[str, float], reference: RealMotionR
     ``base*(tol-1)+1e-8`` with no floor (defect D3b). For golden regression
     tests only -- see the module docstring's ``legacy`` parameter note.
     """
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
     for k, v in residuals.items():
         base = reference.inv_baseline.get(k)
         if base is None:

@@ -79,8 +79,18 @@ class HeteroscedasticPoseReader:
             raise ValueError(
                 f"q_lo shape {tuple(self.q_lo.shape)} != "
                 f"q_hi shape {tuple(self.q_hi.shape)}")
-        self.view_embedding = ViewEmbedding(in_dim=self.head.in_dim,
-                                            view_layout=self.view_layout)
+        view_embedding = ViewEmbedding(in_dim=self.head.in_dim,
+                                       view_layout=self.view_layout)
+        # Place it on whatever device the head already lives on. `load_head`
+        # does `head.to(device)` *before* this reader is constructed, so a
+        # freshly built ViewEmbedding would default to CPU and its bias would
+        # meet CUDA tokens in `forward` -- "Expected all tensors to be on the
+        # same device". Zero-init means the bias is numerically a no-op at
+        # n_views=1, so this placement fixes a crash without moving any number.
+        head_param = next(self.head.parameters(), None)
+        if head_param is not None:
+            view_embedding = view_embedding.to(head_param.device)
+        self.view_embedding = view_embedding
 
     def read(self, frames: torch.Tensor) -> Readout:
         """``(T,H,W,3)`` uint8 or ``(B,T,3,H,W)`` float in ``[0,1]`` -> Readout."""

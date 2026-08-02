@@ -22,7 +22,7 @@ declaration fails CI rather than silently corrupting a benchmark.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import torch
 
@@ -82,18 +82,23 @@ class MetricSpec:
     unobservable_when:
         Conditions under which this metric is structurally incapable of firing,
         as ``"attribute=value"`` strings checked against
-        :attr:`MetricContext.flags`. The canonical case is
-        ``"limit_semantics=squashed"``: a head that sigmoid-squashes joint
+        :attr:`MetricContext.flags`. Historically this gated
+        ``limit_violation_frac``/``limit_excess_rad`` on
+        ``"limit_semantics=squashed"`` (a head that sigmoid-squashes joint
         angles into the URDF limits can never exceed them, so joint-limit
-        violation is always exactly zero for a reason that has nothing to do
-        with the video being scored.
+        violation would be exactly zero for a reason that has nothing to do
+        with the video being scored) -- that head family is gone (see
+        ``legacy_docs/PROVENANCE.md``'s D7 addendum) and no metric currently declares
+        this, but the mechanism stays available for the next metric that is
+        structurally blind under some head/robot combination rather than
+        merely missing an input.
     perframe:
         Whether the metric also emits a per-frame array into the sidecar NPZ.
     """
 
     key: str
     units: str
-    dt_exponent: Optional[int]
+    dt_exponent: int | None
     direction: Direction
     requires: frozenset[str]
     min_frames: int = 1
@@ -127,13 +132,13 @@ class MetricContext:
     """
 
     dt: float
-    P: Optional[torch.Tensor] = None            # (B,T,K,3) metres
-    R: Optional[torch.Tensor] = None            # (B,T,K,3,3)
-    q: Optional[torch.Tensor] = None            # (B,T,n_joints) radians
-    q_raw: Optional[torch.Tensor] = None        # (B,T,n_joints) unsquashed
+    P: torch.Tensor | None = None            # (B,T,K,3) metres
+    R: torch.Tensor | None = None            # (B,T,K,3,3)
+    q: torch.Tensor | None = None            # (B,T,n_joints) radians
+    q_raw: torch.Tensor | None = None        # (B,T,n_joints) unsquashed
     robot: Any = None                           # RobotSpec
-    flags: Dict[str, str] = field(default_factory=dict)
-    aux: Dict[str, Any] = field(default_factory=dict)
+    flags: dict[str, str] = field(default_factory=dict)
+    aux: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         validate_dt(self.dt)
@@ -169,15 +174,15 @@ class MetricValue:
 
     key: str
     value: float
-    reason: Optional[str] = None
-    perframe: Optional[Any] = None              # np.ndarray when spec.perframe
+    reason: str | None = None
+    perframe: Any | None = None              # np.ndarray when spec.perframe
 
     @property
     def available(self) -> bool:
         return self.reason is None
 
     @classmethod
-    def unavailable(cls, key: str, reason: str) -> "MetricValue":
+    def unavailable(cls, key: str, reason: str) -> MetricValue:
         return cls(key=key, value=float("nan"), reason=reason)
 
 
@@ -209,7 +214,7 @@ class BaseMetric:
             return MetricValue.unavailable(self.spec.key, reason)
         return self._compute(ctx)
 
-    def unavailable_reason(self, ctx: MetricContext) -> Optional[str]:
+    def unavailable_reason(self, ctx: MetricContext) -> str | None:
         """Why this metric cannot be computed here, or ``None`` if it can."""
         for cond in self.spec.unobservable_when:
             flag, _, want = cond.partition("=")
@@ -230,7 +235,7 @@ class BaseMetric:
 
 
 # ── registry ────────────────────────────────────────────────────────────────
-REGISTRY: Dict[str, Metric] = {}
+REGISTRY: dict[str, Metric] = {}
 
 
 def register(metric: Metric) -> Metric:
@@ -256,6 +261,6 @@ def get_metric(key: str) -> Metric:
             f"unknown metric {key!r}; registered: {sorted(REGISTRY)}") from None
 
 
-def all_metrics() -> Dict[str, Metric]:
+def all_metrics() -> dict[str, Metric]:
     """Shallow copy of the registry, for tests and suite construction."""
     return dict(REGISTRY)

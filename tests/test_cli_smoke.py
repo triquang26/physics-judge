@@ -15,7 +15,9 @@ import sys
 
 import pytest
 
-from kinescore.cli.main import _SUBCOMMANDS, build_parser, main
+from kinescore.cli.main import _discover_commands, build_parser, main
+
+_COMMAND_NAMES = [m.NAME for m in _discover_commands()]
 
 
 class TestHelp:
@@ -24,10 +26,10 @@ class TestHelp:
             main(["--help"])
         assert exc.value.code == 0
         out = capsys.readouterr().out
-        for name, _ in _SUBCOMMANDS:
+        for name in _COMMAND_NAMES:
             assert name in out
 
-    @pytest.mark.parametrize("name", [n for n, _ in _SUBCOMMANDS])
+    @pytest.mark.parametrize("name", _COMMAND_NAMES)
     def test_subcommand_help_exits_zero(self, name, capsys):
         with pytest.raises(SystemExit) as exc:
             main([name, "--help"])
@@ -42,6 +44,21 @@ class TestHelp:
             main(["reference", "build", "--help"])
         assert exc.value.code == 0
         assert "usage:" in capsys.readouterr().out
+
+    def test_bench_noise_floor_help_exits_zero(self, capsys):
+        # `bench` also has a nested subparser (`run`/`noise-floor`); its own
+        # --help must work independently of `bench --help`.
+        with pytest.raises(SystemExit) as exc:
+            main(["bench", "noise-floor", "--help"])
+        assert exc.value.code == 0
+        assert "usage:" in capsys.readouterr().out
+
+    def test_data_ingest_and_verify_help_exit_zero(self, capsys):
+        for action in ("ingest", "verify"):
+            with pytest.raises(SystemExit) as exc:
+                main(["data", action, "--help"])
+            assert exc.value.code == 0
+            assert "usage:" in capsys.readouterr().out
 
     def test_no_command_prints_help_and_returns_nonzero(self, capsys):
         rc = main([])
@@ -88,9 +105,10 @@ class TestDoctor:
         installed": both a plain ``import torch`` statement and
         ``importlib.import_module("torch")`` check ``sys.modules`` first and
         raise ``ImportError`` when an entry is explicitly ``None``, so both
-        of ``cmd_doctor``'s two import paths (``_check_import`` and
-        ``_torch_info``'s own ``import torch``) see a consistently "missing"
-        torch, unlike patching ``__import__`` (which ``importlib`` bypasses).
+        of ``kinescore.bench.doctor``'s two import paths (``_check_import``
+        and ``_torch_info``'s own ``import torch``) see a consistently
+        "missing" torch, unlike patching ``__import__`` (which ``importlib``
+        bypasses).
         """
         monkeypatch.setitem(sys.modules, "torch", None)
         rc = main(["doctor", "--json"])
@@ -132,7 +150,7 @@ class TestDescribe:
                                                                      tmp_path):
         """``--reader`` on a ReadoutV2 (heteroscedastic) checkpoint must
         surface that limit_violation becomes observable under raw_rad --
-        see docs/PROVENANCE.md D7 and cli/cmd_describe.py's docstring."""
+        see legacy_docs/PROVENANCE.md D7 and cli/cmd_describe.py's docstring."""
         import torch
 
         from kinescore.core.clip import ViewLayout
@@ -153,21 +171,34 @@ class TestDescribe:
         assert "OBSERVABLE" in payload["reader"]["note"]
         assert payload["reader"]["sigma_scale"] == pytest.approx(1.9375)
 
-    def test_describe_reader_json_surfaces_squashed_unobservability(self, capsys,
-                                                                     tmp_path):
-        from kinescore.core.clip import ViewLayout
-        from kinescore.heads.attentive import AttentivePoseHead
-        from kinescore.readers import checkpoint as ckpt_mod
+    def test_describe_reader_json_surfaces_legacy_attentive_checkpoint(self, capsys,
+                                                                        tmp_path):
+        """A legacy AttentivePoseHead-format checkpoint (the format every
+        squashed reader used) is still cheaply describable -- `describe`
+        never constructs a reader -- but the note must say it can no longer
+        be scored with, now that SquashedPoseReader is gone (see
+        legacy_docs/PROVENANCE.md's D7 addendum).
 
-        head = AttentivePoseHead(in_dim=8, hidden=8, n_joints=5, n_heads=2, n_cams=1)
+        Only the checkpoint's cfg SHAPE matters for ``describe`` (it never
+        constructs a model) -- so this writes a legacy-format ``{"head",
+        "cfg", "meta"}`` file directly rather than via the now-deleted
+        ``AttentivePoseHead``/``readers/checkpoint.py::save``."""
+        import torch
+
+        from kinescore.core.clip import ViewLayout
+
         path = str(tmp_path / "attentive.pt")
-        ckpt_mod.save(path, head, view_layout=ViewLayout(), robot_name="franka_panda")
+        cfg = {"hidden": 8, "n_heads": 2, "n_cams": 1, "embed_dim": 8,
+              "dropout": 0.1, "robot_name": "franka_panda",
+              "view_layout_key": ViewLayout().key, "limit_semantics": "squashed"}
+        torch.save({"head": {}, "cfg": cfg, "meta": {}}, path)
 
         rc = main(["describe", "--reader", path, "--json"])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["reader"]["limit_semantics"] == "squashed"
-        assert "UNOBSERVABLE" in payload["reader"]["note"]
+        assert "no longer" in payload["reader"]["note"]
+        assert "NotImplementedError" in payload["reader"]["note"]
 
     def test_describe_without_reader_has_no_reader_key(self, capsys):
         rc = main(["describe", "--json"])

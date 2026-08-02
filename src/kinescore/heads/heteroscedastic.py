@@ -7,15 +7,15 @@ out-of-limit pose; see ``heads/ranges.py`` for the D7 writeup and
 :func:`~kinescore.heads.ranges.clamp_for_fk`, which turns ``mu`` into an
 FK-safe pose plus the violation magnitude). ``sigma`` (from ``logvar``) is the
 model's **aleatoric** uncertainty only -- the irreducible per-joint noise it
-learned to expect -- it is **not** an OOD detector. The OOD axis is *ensemble
-disagreement* (epistemic variance across members), computed in
-``readers/ensemble.py``.
+learned to expect -- it is **not** an OOD detector. The OOD axis would be
+*ensemble disagreement* (epistemic variance across members, computed from
+several members' means) -- no ensemble reader ships in this package today
+(``readers/ensemble.py`` was removed as dead code; nothing constructed it).
 
 What this adds over a per-frame attentive probe
 -------------------------------------------------
-* **Temporal context.** A per-frame :class:`FramePool` (structurally the same
-  attentive-probe pool as :class:`~kinescore.heads.attentive.AttentivePoseHead`,
-  minus the multiview ``cam_emb`` -- multiview support for this head is
+* **Temporal context.** A per-frame :class:`FramePool` (an attentive-probe
+  pool, minus a multiview ``cam_emb`` -- multiview support for this head is
   composed externally via :class:`~kinescore.heads.views.ViewEmbedding`, see
   ``readers/heteroscedastic.py``) feeds a bidirectional
   :class:`TemporalEncoder`; the two are combined by a residual so a single
@@ -31,8 +31,6 @@ contract this package owns and live with the training code that consumes
 them.
 """
 from __future__ import annotations
-
-from typing import Dict
 
 import torch
 import torch.nn as nn
@@ -185,7 +183,7 @@ class ReadoutV2Head(nn.Module):
         self.logvar_head = nn.Linear(self.d_model, self.n_out)  # clamped logvar
 
     def forward(self, feat: torch.Tensor, use_context: bool = True
-               ) -> Dict[str, torch.Tensor]:
+               ) -> dict[str, torch.Tensor]:
         """``(B, T, P, D) -> {"mu": (B,T,n_out), "logvar": (B,T,n_out)}``.
 
         ``mu`` is raw radians (no squash). ``logvar`` is clamped into

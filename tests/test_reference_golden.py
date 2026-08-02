@@ -40,7 +40,7 @@ import re
 import numpy as np
 import pytest
 
-from kinescore.reference.fingerprint import RealMotionReference, UNIT_FLOORS
+from kinescore.reference.fingerprint import UNIT_FLOORS, RealMotionReference
 from kinescore.reference.normalize import invariance_score
 
 GOLDEN_DIR = __import__("pathlib").Path(__file__).parent / "golden"

@@ -12,7 +12,7 @@ finite-difference truncation error enters, and the two versions can only be
 expected to agree within a few percent, not to float32 precision. The
 tolerances below (``rtol=0.05`` at k=2, ``0.10`` at k=4) leave roughly 3x
 headroom over the actual measured source errors (0.2-5.7%, per
-``docs/PROVENANCE.md``'s D1 analysis) -- tight enough to catch a real
+``legacy_docs/PROVENANCE.md``'s D1 analysis) -- tight enough to catch a real
 regression, loose enough not to flake on legitimate FD truncation error.
 
 The **negative control** (:func:`test_wrong_dt_is_detected`) is the other

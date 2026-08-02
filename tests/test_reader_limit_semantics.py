@@ -1,10 +1,13 @@
 """``limit_semantics`` is what a reader declares, and it must be true.
 
-See ``core/reader.py``: a ``"squashed"`` reader's ``q`` is inside limits *by
-construction* and ``q_raw`` must be ``None`` (nothing downstream should be
-tempted to treat a squashed head's absence of violation as a measurement). A
-``"raw_rad"`` reader exposes the unconstrained ``q_raw`` and the clamp
-magnitude that makes joint-limit violation observable.
+See ``core/reader.py``: a ``"raw_rad"`` reader exposes the unconstrained
+``q_raw`` and the clamp magnitude that makes joint-limit violation
+observable -- the property every live reader in this package now has.
+(The squashed-reader case -- ``q`` inside limits *by construction*,
+``q_raw`` always ``None`` -- used to be exercised here too, against
+``readers/squashed.py::SquashedPoseReader``; that reader was removed, see
+``legacy_docs/PROVENANCE.md``'s D7 addendum, so this file now only covers the
+``raw_rad`` half of the contract.)
 
 No real backbone is loaded here (network/GPU/weights) -- a tiny stand-in with
 the same ``encode(rgb) -> (N,V,P,D)`` contract is used instead, so this stays
@@ -15,10 +18,8 @@ from __future__ import annotations
 import torch
 
 from kinescore.core.clip import ViewLayout
-from kinescore.heads.attentive import AttentivePoseHead
 from kinescore.heads.heteroscedastic import ReadoutV2Head
 from kinescore.readers.heteroscedastic import HeteroscedasticPoseReader
-from kinescore.readers.squashed import SquashedPoseReader
 
 D = 12
 P_TOKENS = 9  # 3x3 patch grid
@@ -40,30 +41,6 @@ class _FakeBackbone:
 
 def _clip(T: int = 5, H: int = 32, W: int = 32) -> torch.Tensor:
     return torch.randint(0, 255, (T, H, W, 3), dtype=torch.uint8)
-
-
-def test_squashed_reader_q_inside_limits_and_q_raw_none():
-    n_joints = 5
-    layout = ViewLayout(n_views=1, tokens_per_view=P_TOKENS)
-    backbone = _FakeBackbone(layout)
-    head = AttentivePoseHead(in_dim=D, hidden=8, n_joints=n_joints, n_heads=2,
-                             n_cams=1)
-    head.eval()
-    q_lo = torch.tensor([-1.0, -2.0, -0.5, -3.0, -1.5])
-    q_hi = torch.tensor([1.0, 2.0, 0.5, 3.0, 1.5])
-    reader = SquashedPoseReader(backbone=backbone, head=head, q_lo=q_lo, q_hi=q_hi,
-                                view_layout=layout, robot_name="franka_panda",
-                                reader_id="squashed/test")
-
-    assert reader.limit_semantics == "squashed"
-    out = reader.read(_clip())
-    assert out.q_raw is None
-    assert out.q.shape == (1, 5, n_joints)
-    lo = q_lo.view(1, 1, -1)
-    hi = q_hi.view(1, 1, -1)
-    assert bool((out.q > lo).all())
-    assert bool((out.q < hi).all())
-    assert out.aux is not None  # gripper logit
 
 
 def test_heteroscedastic_reader_exposes_q_raw_and_clamp_magnitude():

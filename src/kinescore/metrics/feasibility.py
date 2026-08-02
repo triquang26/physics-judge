@@ -313,6 +313,7 @@ class NoTeleport(SafeMetric):
         self.spec = MetricSpec(
             key="no_teleport_frac", units="fraction", dt_exponent=None,
             direction="lower_better", requires=frozenset({"P"}), min_frames=2,
+            perframe=True,
             description=(
                 "Fraction of FRAMES where the worst (max) keypoint's "
                 f"Cartesian speed ||dP/dt|| exceeds v_kp_max={v_kp_max} m/s "
@@ -320,13 +321,22 @@ class NoTeleport(SafeMetric):
                 "the source: amax over keypoints per frame, then a frac "
                 "over frames. dt_exponent=None: a threshold crossing "
                 "against an absolute bound, same reasoning as "
-                "accel_violation_frac."))
+                "accel_violation_frac. perframe=True: the per-frame boolean "
+                "(0.0/1.0) this class's amax-then-threshold already computes "
+                "at frame granularity -- its mean over frames IS the scalar "
+                "exactly (up to float summation order), so this is a "
+                "genuine 'where it fired' indicator, not a re-derived "
+                "approximation. One finite difference drops 1 frame, from "
+                "the front: trace length == n_frames - 1, trace[0] is "
+                "frame 1."))
 
     def _compute(self, ctx: MetricContext) -> MetricValue:
         v = torch.linalg.norm(fd(ctx.P, ctx.dt), dim=-1)            # (B,T-1,K)
         v_frame = v.amax(dim=-1)                                    # (B,T-1)
         frac = (v_frame > self.v_kp_max).float().mean()
-        return self._ok(frac)
+        perframe = (v_frame > self.v_kp_max).float().reshape(
+            -1).detach().cpu().numpy()
+        return self._ok(frac, perframe=perframe)
 
 
 register(Penetration())

@@ -10,14 +10,20 @@ iteration order (D4b).
 from __future__ import annotations
 
 from kinescore.reference.distances import kfd, kfd_approx, profile_w1
-from kinescore.reference.fingerprint import (RateMismatchError,
-                                              RealMotionReference,
-                                              SCHEMA_VERSION, UNIT_FLOORS)
-from kinescore.reference.normalize import (ComparabilityError,
-                                            DEFAULT_FRAC_TOL, DEFAULT_TOL,
-                                            InvarianceResult,
-                                            assert_comparable,
-                                            invariance_score)
+from kinescore.reference.fingerprint import (
+    SCHEMA_VERSION,
+    UNIT_FLOORS,
+    RateMismatchError,
+    RealMotionReference,
+)
+from kinescore.reference.normalize import (
+    DEFAULT_FRAC_TOL,
+    DEFAULT_TOL,
+    ComparabilityError,
+    InvarianceResult,
+    assert_comparable,
+    invariance_score,
+)
 
 __all__ = [
     "RealMotionReference", "RateMismatchError", "UNIT_FLOORS", "SCHEMA_VERSION",

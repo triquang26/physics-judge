@@ -31,7 +31,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 
 #: Source modules that ``src/`` mentions but deliberately does NOT port. Each
-#: must have a matching entry in ``docs/PROVENANCE.md`` under "not ported".
+#: must have a matching entry in ``legacy_docs/PROVENANCE.md`` under "not ported".
 #: Listing them here rather than loosening the check keeps the omission a
 #: reviewed decision instead of an accident.
 CITED_NOT_PORTED: frozenset[str] = frozenset({
@@ -145,7 +145,7 @@ def test_every_cited_source_is_hashed_or_declared_unported():
         "status is unverifiable:\n  " + "\n  ".join(uncovered)
         + "\nEither add the source to SOURCES_A / SOURCES_B and re-run the "
           "snapshot, or add it to CITED_NOT_PORTED with a "
-          "docs/PROVENANCE.md entry.")
+          "legacy_docs/PROVENANCE.md entry.")
 
 
 def test_sources_sha256_is_not_stale():

@@ -1,10 +1,13 @@
 """CLI wiring: ``--reader`` auto-routes to the right reader family.
 
 ``kinescore.cli._scoring.build_scorer`` used to raise ``NotImplementedError``
-for anything that wasn't an :class:`~kinescore.heads.attentive.AttentivePoseHead`
-checkpoint (see the removed docstring this replaced). These tests exercise
+for anything that wasn't a legacy ``AttentivePoseHead``-format checkpoint --
+that head class has since been deleted as dead code (its one reader,
+``SquashedPoseReader``, was removed; see ``legacy_docs/PROVENANCE.md``'s D7
+addendum), so it is now the OTHER way around: only a ``ReadoutV2Head`` cfg
+routes to a working reader, everything else raises. These tests exercise
 ``build_scorer`` itself -- not just the lower-level
-``kinescore.readers.checkpoint.load_reader`` it now delegates to (that is
+``kinescore.readers.loader.load_reader`` it now delegates to (that is
 covered file-by-file in ``tests/test_checkpoint_v2.py``) -- with a real
 ``--robot franka_panda`` (needs the cached Panda URDF the rest of this test
 suite already depends on; see ``tests/conftest.py::panda_urdf_path``) so this
@@ -21,11 +24,8 @@ import pytest
 import torch
 
 from kinescore.core.clip import ViewLayout
-from kinescore.heads.attentive import AttentivePoseHead
 from kinescore.heads.heteroscedastic import ReadoutV2Head
-from kinescore.readers import checkpoint as ckpt_mod
 from kinescore.readers import checkpoint_v2
-from kinescore.readers.squashed import SquashedPoseReader
 
 
 def _args(**kw) -> argparse.Namespace:
@@ -64,24 +64,29 @@ def test_build_scorer_routes_readout_v2_checkpoint(tmp_path, _requires_franka_ur
     assert scorer.robot.name == "franka_panda"
 
 
-def test_build_scorer_still_routes_attentive_checkpoint(tmp_path, _requires_franka_urdf):
-    """Regression: the pre-existing squashed/Franka path must be unaffected
-    by adding the ReadoutV2 branch -- same reader type, same limit_semantics
-    as before this change."""
+def test_build_scorer_raises_for_legacy_attentive_checkpoint(tmp_path, _requires_franka_urdf):
+    """The squashed pose-reader path was removed (see legacy_docs/PROVENANCE.md's D7
+    addendum) -- a legacy AttentivePoseHead-format checkpoint no longer has a
+    reader to route to, so `build_scorer` must fail loudly rather than build
+    a SquashedPoseReader (or anything else) for it.
+
+    Only the checkpoint's cfg SHAPE matters for routing (checked before any
+    model construction) -- so this writes a legacy-format ``{"head", "cfg",
+    "meta"}`` file directly rather than via the now-deleted
+    ``AttentivePoseHead``/``readers/checkpoint.py::save``."""
     from kinescore.cli._scoring import build_scorer
 
-    head = AttentivePoseHead(in_dim=32, hidden=16, n_joints=7, n_heads=2, n_cams=1)
-    head.eval()
-    path = str(tmp_path / "attentive7.pt")
     layout = ViewLayout(n_views=1)
-    ckpt_mod.save(path, head, view_layout=layout, robot_name="franka_panda",
-                 limit_semantics="squashed", backbone_cfg={"embed_dim": 32})
+    path = str(tmp_path / "attentive7.pt")
+    cfg = {"hidden": 16, "n_heads": 2, "n_cams": 1, "embed_dim": 32,
+          "dropout": 0.1, "robot_name": "franka_panda",
+          "view_layout_key": layout.key, "limit_semantics": "squashed",
+          "backbone": {"embed_dim": 32}}
+    torch.save({"head": {}, "cfg": cfg, "meta": {}}, path)
 
     args = _args(reader=path)
-    scorer = build_scorer(args, layout)
-
-    assert isinstance(scorer.reader, SquashedPoseReader)
-    assert scorer.reader.limit_semantics == "squashed"
+    with pytest.raises(NotImplementedError, match="AttentivePoseHead"):
+        build_scorer(args, layout)
 
 
 def test_build_scorer_raises_on_joint_count_mismatch_for_readout_v2(

@@ -85,7 +85,7 @@ LINK_FALLBACKS: dict[str, tuple[str, ...]] = {
 # default 1 mm threshold (DEGENERATE_BONE_M) is built to catch: a rigid,
 # motionless arm that merely opens its gripper measures a nonzero
 # "rigidity_residual_mm" purely because bone 5's realised length IS the
-# gripper opening (see docs/PROVENANCE.md, defect D9).
+# gripper opening (see legacy_docs/PROVENANCE.md, defect D9).
 #
 # But bones 4 (panda_hand -> panda_leftfinger, 0.0584 m) and 6
 # (panda_rightfinger -> panda_hand_tcp, 0.045 m) carry the same defect for a

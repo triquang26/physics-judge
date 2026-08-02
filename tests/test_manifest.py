@@ -23,11 +23,12 @@ from kinescore.bench.manifest import (
 from kinescore.core.clip import TimebaseError
 
 
-def _row(pair_key, role, w=64, h=64, method="m", family="f", codec="h264"):
+def _row(pair_key, role, w=64, h=64, method="m", family="f", codec="h264",
+        dt=0.1):
     return {"method": method, "family": family, "episode": pair_key.split("/")[-1],
            "role": role, "path": f"/tmp/{pair_key}_{role}.mp4",
-           "n_frames": 10, "fps": 10.0, "w": w, "h": h, "dt": 0.1,
-           "pair_key": pair_key, "fps_probed": 10.0, "dt_source": "ffprobe",
+           "n_frames": 10, "fps": 1.0 / dt, "w": w, "h": h, "dt": dt,
+           "pair_key": pair_key, "fps_probed": 1.0 / dt, "dt_source": "ffprobe",
            "codec": codec, "sha1": None, "view_layout": "1x?:unnamed"}
 
 
@@ -52,6 +53,47 @@ class TestVerifyManifest:
         report = verify_manifest(rows)
         assert report["ok"] is False
         assert report["mismatches"][0]["codec_ok"] is False
+
+    def test_dt_mismatch_is_reported(self):
+        # RATE_POLICY layer 1 ("paired"): dt cancels only when the pair
+        # genuinely shares a timebase. A gt probed at 10 fps (dt=0.1) paired
+        # with a pred probed at 16 fps (dt=0.0625) -- the literal
+        # dreamdojo-vs-dreamgen rate mismatch this check exists to catch --
+        # must be a hard mismatch, not silently accepted.
+        rows = [_row("m/ep0", "gt", dt=0.1), _row("m/ep0", "pred", dt=1.0 / 16.0)]
+        report = verify_manifest(rows)
+        assert report["ok"] is False
+        assert report["n_mismatches"] == 1
+        mismatch = report["mismatches"][0]
+        assert mismatch["dt_ok"] is False
+        assert mismatch["gt_dt"] == pytest.approx(0.1)
+        assert mismatch["pred_dt"] == pytest.approx(1.0 / 16.0)
+        # wh/codec were fine -- only dt is the reported cause.
+        assert mismatch["wh_ok"] is True
+        assert mismatch["codec_ok"] is True
+
+    def test_matching_dt_within_tolerance_is_not_a_mismatch(self):
+        # Container fps rounding (e.g. 29.97 vs 30) must not false-positive.
+        rows = [_row("m/ep0", "gt", dt=1.0 / 30.0),
+               _row("m/ep0", "pred", dt=1.0 / 29.97)]
+        report = verify_manifest(rows)
+        assert report["ok"] is True
+        assert report["n_mismatches"] == 0
+
+    def test_dt_tolerance_is_configurable(self):
+        rows = [_row("m/ep0", "gt", dt=0.100), _row("m/ep0", "pred", dt=0.102)]
+        # 2% relative difference: passes a loose tolerance, fails a tight one.
+        assert verify_manifest(rows, dt_rel_tol=0.05)["ok"] is True
+        assert verify_manifest(rows, dt_rel_tol=0.01)["ok"] is False
+
+    def test_dt_and_wh_can_both_be_reported_in_one_mismatch(self):
+        rows = [_row("m/ep0", "gt", w=64, h=64, dt=0.1),
+               _row("m/ep0", "pred", w=32, h=32, dt=1.0 / 16.0)]
+        report = verify_manifest(rows)
+        assert report["ok"] is False
+        mismatch = report["mismatches"][0]
+        assert mismatch["wh_ok"] is False
+        assert mismatch["dt_ok"] is False
 
     def test_unpaired_role_is_not_checked_or_counted_as_a_pair(self):
         # A lone "real" role clip (no gt/pred counterpart) isn't a pair at

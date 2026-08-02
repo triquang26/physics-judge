@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 
+NAME = "calibrate"
 HELP = "fit a post-hoc sigma temperature for a heteroscedastic head"
 
 

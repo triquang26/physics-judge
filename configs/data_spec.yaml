@@ -1,0 +1,118 @@
+# Per-generator on-disk file contract, exclusion globs, and per-robot data
+# layout -- the data-driven table `kinescore data ingest`/`kinescore data
+# verify` both read (kinescore.bench.data_spec.load_data_spec). Nothing here
+# is hardcoded in Python: a resolution/fps/generator-shape change is a YAML
+# edit, and `kinescore data verify` fails with the SPECIFIC clip path when a
+# clip on disk disagrees with what is declared here.
+#
+# `horizon` values are the dataset's OWN spelling -- `makovian`, not
+# "markovian" -- reproduced verbatim throughout this repo; do not "fix" the
+# spelling, it would stop matching the real directory names.
+#
+# `shape` says which of three coexisting on-disk layouts this generator uses
+# (see kinescore.bench.layout.RawHFLayout's module docstring for how each is
+# walked):
+#   episode_dir   -- one directory per episode, pred+gt filenames fixed
+#                    (ctrlworld).
+#   task_episode  -- <task>/episode_XXXXXX.mp4 under a pinned iter_* dir, no
+#                    ground truth anywhere (dreamgen).
+#   flat_or_dir   -- TWO coexisting shapes in one iter_* dir: flat
+#                    (`NNNN_pred.mp4`/`NNNN_gt.mp4`) and dir
+#                    (`episode_<id>/full_pred.mp4`+`full_gt.mp4`), neither a
+#                    subset of the other (dreamdojo -- see
+#                    kinescore.bench.sources.dreamdojo's docstring for the
+#                    full investigation that established this).
+generators:
+  ctrlworld:
+    shape: episode_dir
+    pred_filename: pred_all_views.mp4
+    gt_filename: gt_all_views.mp4
+    has_iter_level: false
+    width: 960
+    height: 192
+    fps: 5.0
+    # 2 of 396 probed episodes measure 30 fps in one cell -- a real minority,
+    # not a probe error (see kinescore.bench.sources.ctrlworld's docstring).
+    # `verify` must not hard-fail those two.
+    fps_tolerant: true
+    n_views: 3
+    has_ground_truth: true
+  dreamgen:
+    shape: task_episode
+    pred_glob: "episode_*.mp4"
+    gt_filename: null
+    has_iter_level: true
+    width: 768
+    height: 432
+    fps: 16.0
+    fps_tolerant: false
+    n_views: 1
+    has_ground_truth: false
+  dreamdojo:
+    shape: flat_or_dir
+    flat_pred_glob: "*_pred.mp4"
+    flat_gt_glob: "*_gt.mp4"
+    dir_pred_filename: full_pred.mp4
+    dir_gt_filename: full_gt.mp4
+    has_iter_level: true
+    width: 640
+    height: 480
+    # fps is per-ROBOT, not global -- 10 fps for fourier_gr1, 15 for
+    # franka_panda (see kinescore.bench.config._parse_fps_expected's
+    # docstring for the 480-episode incident a flat table caused).
+    fps_by_robot:
+      fourier_gr1: 10.0
+      franka_panda: 15.0
+    fps_tolerant: false
+    n_views: 1
+    has_ground_truth: true
+
+# Directories that are verified ablations/junk, never real benchmark data.
+# Matched as a "**"-aware glob against each candidate path relative to
+# $KINESCORE_DATA_ROOT (see kinescore.bench.layout._glob_excluded) --
+# `**` matches zero or more whole path segments, `*`/`?` match within one
+# segment. A literal `?` in a filename (the malformed HF download-link
+# artifact below) is escaped as `[?]` so it is not read as a wildcard.
+#
+# NOTE on what is deliberately absent here: an earlier revision also listed
+# `**/*_static16fps/**` and `**/*bimanual16fps/**`. Both were removed --
+# reconciliation task, see kinescore.bench.layout's module docstring -- once
+# it was confirmed that `_static16fps`/`bimanual16fps` are not ablation
+# markers at all but the literal suffix of real, populated, human-verified
+# `iter_*` directories that are the PINNED, scored iteration for several
+# cells (dreamgen franka_panda/makovian: `iter_000090000_static16fps`, 120
+# episodes; dreamgen aloha_bimanual: `iter_000110000_bimanual16fps`, 300
+# episodes across both horizons -- the ONLY iter present for bimanual/
+# singleview/dreamgen). Applied literally, those two globs excluded real
+# data with no compensating benefit: `kinescore.bench.sources.*` (the
+# plugins `kinescore bench run` actually reads through) never consult
+# `exclude_globs` at all -- they resolve `sources.<generator>.iter` from
+# `configs/benchmark*.yaml` as an explicit whitelist, so a directory that is
+# never pinned there is never read regardless of what this list says. The
+# only place `exclude_globs` has teeth is `kinescore.bench.layout.RawHFLayout`
+# (`data ingest`/`data verify`'s raw-tree walk), where it filters candidate
+# `iter_*` directories before auto-picking the most populated one -- and
+# THAT is exactly where these two entries were actively harmful, silently
+# removing the pinned directories from candidacy. See
+# tests/test_bench_layout.py::TestExcludeGlobsMatchRealDataSpec for the
+# pinned outcome.
+exclude_globs:
+  - "**/tmp/**"
+  - "video_gen_physics_real_video/*_dreamgen*/**"
+  - "**/base_2b/**"
+  - "**/_fps_compare/**"
+  - "**/*_cond1/**"
+  - "**/*_cond5/**"
+  - "**/wget-log"
+  - "**/gr00t[?]rlkey=bhkxfigxkt8fmbxb88qnq1og7"
+
+# Per-robot training-format contract: the embodiment directory (redundant
+# with configs/robot_map.yaml, repeated here so `verify` can run against
+# this file alone) plus which generators' clips this robot is ever scored
+# against. See configs/robot_map.yaml for the authoritative version kept in
+# sync with this; `kinescore data verify` cross-checks the two agree.
+robots:
+  fourier_gr1: {embodiment: humanoid, generators: [dreamgen, dreamdojo]}
+  airbot_mmk2: {embodiment: humanoid, generators: [ctrlworld]}
+  franka_panda: {embodiment: single_arm, generators: [ctrlworld, dreamgen, dreamdojo]}
+  aloha_bimanual: {embodiment: bimanual, generators: [ctrlworld, dreamgen, dreamdojo]}

@@ -17,14 +17,14 @@ deliberate:
    The source split a multiview frame stack with a bespoke
    ``H % self.n_cams`` check inside ``_encode_pixels``. That duplicated (and
    could silently disagree with) the same arithmetic done by the head and by
-   the cache writer. Here ``encode`` calls ``view_layout.view_height`` instead
-   -- one implementation of "how tall is one camera's crop", shared by every
-   caller.
+   the cache writer. Here ``encode`` calls ``view_layout.view_crops`` instead
+   -- one implementation of "which pixels belong to which camera", covering
+   every packing (height/width stack, 2x2 grid) and panel subset, shared by
+   every caller.
 """
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -52,6 +52,12 @@ _DINOV3_HF = {
 _DINOV3_DEFAULTS = {"patch_size": 16, "n_register": 4}
 _DINOV2_PATCH = 14
 
+#: ``ViewLayout`` is a frozen dataclass, so one shared instance is a safe
+#: default -- see ``kinescore.core.clip``'s ``_DEFAULT_VIEW_LAYOUT`` for why
+#: this is a module-level singleton rather than a bare ``ViewLayout()`` call
+#: in the signature below.
+_DEFAULT_VIEW_LAYOUT = ViewLayout()
+
 
 class FeatureBackbone(nn.Module):
     """Frozen DINOv2/DINOv3 patch-token encoder, lazily loaded.
@@ -78,7 +84,7 @@ class FeatureBackbone(nn.Module):
         ``k`` for :func:`~kinescore.backbones.pooling.pool_patch_tokens`.
     view_layout:
         Camera packing of the *input* frame (pixel space). ``encode`` uses
-        ``view_layout.view_height`` to crop each camera before encoding it,
+        ``view_layout.view_crops`` to crop each camera before encoding it,
         instead of a hardcoded ``H % n_cams``.
     """
 
@@ -92,7 +98,7 @@ class FeatureBackbone(nn.Module):
         hf_model_id: str = "",
         patch_size: int = 0,
         n_register: int = 0,
-        view_layout: ViewLayout = ViewLayout(),
+        view_layout: ViewLayout = _DEFAULT_VIEW_LAYOUT,
     ) -> None:
         super().__init__()
         self.dino_model = dino_model
@@ -120,7 +126,7 @@ class FeatureBackbone(nn.Module):
         self.register_buffer(
             "_std", torch.tensor(_IMAGENET_STD).view(1, 3, 1, 1))
 
-        self._dino: Optional[nn.Module] = None  # lazy (heavy)
+        self._dino: nn.Module | None = None  # lazy (heavy)
 
     # ── frozen backbone (lazy) ────────────────────────────────────────────
 
@@ -190,8 +196,9 @@ class FeatureBackbone(nn.Module):
     def encode(self, rgb: torch.Tensor) -> torch.Tensor:
         """``(N,3,H,W)`` in ``[0,1]`` -> patch tokens ``(N,V,P,D)`` fp16.
 
-        ``H`` is the *stacked* frame height (``view_layout.n_views`` cameras
-        stacked on the height axis, pixel-space packing -- see
+        ``H``/``W`` are the *packed* frame dims (``view_layout.n_views``
+        cameras arranged per ``view_layout.packing`` -- height/width stack or
+        a 2x2 grid, possibly a subset of more physical panels; see
         :class:`~kinescore.core.clip.ViewLayout`). Each camera crop is
         resized and encoded independently; the per-camera token grids come
         back stacked on a new axis ``V`` rather than concatenated into the
@@ -200,9 +207,10 @@ class FeatureBackbone(nn.Module):
         can run :meth:`~kinescore.core.clip.ViewLayout.assert_tokens` on the
         result -- the source concatenated immediately and never checked.
         """
-        V = self.view_layout.n_views
-        H = rgb.shape[2]
-        vh = self.view_layout.view_height(H)  # raises if H is not a V-stack
-        feats = [self._encode_one(rgb[:, :, i * vh:(i + 1) * vh, :])
-                 for i in range(V)]
+        H, W = rgb.shape[2], rgb.shape[3]
+        # Raises if packing is inconsistent with the probed frame instead of
+        # silently slicing the wrong axis.
+        crops = self.view_layout.view_crops(frame_width=W, frame_height=H)
+        feats = [self._encode_one(rgb[:, :, top:bottom, left:right])
+                 for top, bottom, left, right in crops]
         return torch.stack(feats, dim=1)  # (N, V, P, D)

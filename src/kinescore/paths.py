@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 __all__ = ["ENV_VARS", "env_path", "optional_env_path", "output_dir",
            "MissingPathError"]
@@ -50,7 +49,7 @@ def env_path(key: str) -> Path:
     return Path(raw).expanduser().resolve()
 
 
-def optional_env_path(key: str) -> Optional[Path]:
+def optional_env_path(key: str) -> Path | None:
     """Like :func:`env_path` but returns ``None`` instead of raising."""
     try:
         return env_path(key)

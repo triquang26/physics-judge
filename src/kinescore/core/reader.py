@@ -7,24 +7,36 @@ is analytic, so the benchmark cannot drift with a model.
 
 ``limit_semantics`` is the load-bearing field
 ---------------------------------------------
-Two head families exist, and they differ in a way that silently changes what a
-metric means:
+Historically two head families existed here, and they differed in a way that
+silently changed what a metric means: a ``"squashed"`` head emitted
+``q = lo + (hi-lo) * sigmoid(raw)``, so predicted joints were inside the URDF
+limits *by construction* -- joint-limit violation was then exactly ``0.0``
+for every clip ever scored, which read as "perfect" but measured nothing
+about the video (defect D7). That family (the ``squash_to_limits`` function,
+its head, and its reader) has been removed entirely -- see
+``legacy_docs/PROVENANCE.md``'s D7 addendum -- so ``"raw_rad"`` is now the only
+value: the head emits unconstrained radians; FK runs on a clamped copy and
+the clamp magnitude **is** the violation signal.
 
-* ``"squashed"`` -- the head emits ``q = lo + (hi-lo) * sigmoid(raw)``, so
-  predicted joints are inside the URDF limits *by construction*. Joint-limit
-  violation is then exactly ``0.0`` for every clip ever scored, which reads as
-  "perfect" but measures nothing about the video (defect D7).
-* ``"raw_rad"`` -- the head emits unconstrained radians; FK runs on a clamped
-  copy and the clamp magnitude **is** the violation signal.
+``limit_semantics`` stays a declared field rather than being deleted outright
+because a reader should still say what it is instead of every caller
+assuming ``"raw_rad"`` by convention -- and because the general
+``unobservable_when`` mechanism it fed (see ``core/metric.py``) remains
+available to a future head family that is structurally blind to some other
+metric, for whatever reason that turns out to be.
 
-Rather than let this be an accident of which checkpoint was loaded, readers
-declare it. Metrics that are unobservable under a squashed head return ``NaN``
-with the reason ``unobservable:limit_semantics=squashed`` instead of ``0``.
+A third value now exists for a reason unrelated to D7: ``"keypoints"``
+(:class:`~kinescore.readers.direct_keypoint.DirectKeypointPoseReader`) skips
+joint angles and FK entirely, reading 3-D keypoints straight off the frames
+into :attr:`Readout.P`. It has no clamp and no limits to be raw or squashed
+about, so it is not a third flavour of ``"raw_rad"`` -- it is a different
+axis (pixels -> points, not pixels -> joints) that happens to share this
+same reader contract.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import torch
 
@@ -32,7 +44,14 @@ from kinescore.core.clip import ViewLayout
 
 __all__ = ["Readout", "PoseReader", "LimitSemantics"]
 
-LimitSemantics = Literal["squashed", "raw_rad"]
+#: ``"keypoints"`` is a second, structurally different reader family: a head
+#: that regresses 3-D keypoints directly, with no forward-kinematics and no
+#: joint-limit clamp anywhere in the path (see
+#: ``readers/direct_keypoint.py``). It carries no joint-limit semantics at
+#: all -- there is no ``q``/``clamp_for_fk`` to be "raw_rad" or otherwise
+#: about -- so it gets its own value rather than overloading ``"raw_rad"``
+#: for a reader that has no limits to violate.
+LimitSemantics = Literal["raw_rad", "keypoints"]
 
 
 @dataclass
@@ -43,12 +62,15 @@ class Readout:
     ----------
     q:
         ``(B,T,n_joints)`` joint angles in radians, guaranteed inside the URDF
-        limits and therefore safe to feed to FK.
+        limits and therefore safe to feed to FK. ``None`` for a reader that
+        has no joints at all (``limit_semantics="keypoints"``) -- such a
+        reader sets :attr:`P` instead.
     q_raw:
-        ``(B,T,n_joints)`` unsquashed angles, or ``None`` for a squashed head.
-        When present, ``q_raw - clamp(q_raw)`` is the joint-limit excess.
+        ``(B,T,n_joints)`` unclamped angles, or ``None`` for a reader that
+        does not expose them. ``q_raw - clamp(q_raw)`` is the joint-limit
+        excess when present.
     sigma:
-        ``(B,T,n_joints)`` per-joint aleatoric std in radians, for
+        ``(B,T,n_joints)`` or ``(B,T,K)`` per-output aleatoric std, for
         heteroscedastic heads. ``None`` otherwise. Used to gate low-confidence
         frames out of scoring rather than to score them badly.
     aux:
@@ -56,17 +78,28 @@ class Readout:
     extras:
         Anything else a metric may consume, e.g. ``P_free`` and ``gamma`` for
         the FK-projection anomaly, or ensemble disagreement.
+    P:
+        ``(B,T,K,3)`` 3-D keypoints in the robot-base frame, metres. Set by a
+        :class:`~kinescore.readers.direct_keypoint.DirectKeypointPoseReader`
+        (whose ``q``/``q_raw`` are ``None`` -- it never runs FK or a joint
+        clamp); ``None`` for every joint-angle reader.
     """
 
-    q: torch.Tensor
-    q_raw: Optional[torch.Tensor] = None
-    sigma: Optional[torch.Tensor] = None
-    aux: Optional[Any] = None
-    extras: Dict[str, Any] = field(default_factory=dict)
+    q: torch.Tensor | None
+    q_raw: torch.Tensor | None = None
+    sigma: torch.Tensor | None = None
+    aux: Any | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
+    P: torch.Tensor | None = None
 
     @property
     def n_frames(self) -> int:
-        return int(self.q.shape[1])
+        if self.q is not None:
+            return int(self.q.shape[1])
+        if self.P is not None:
+            return int(self.P.shape[1])
+        raise ValueError(
+            "Readout has neither q nor P set -- cannot determine n_frames")
 
 
 @runtime_checkable

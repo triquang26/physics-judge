@@ -8,7 +8,7 @@ so a doc generator (or a test) can rely on the two never drifting apart.
 ``--reader`` (optional) surfaces what a *specific* checkpoint changes about
 that suite's observability -- purely from the checkpoint's ``cfg`` dict, no
 model construction, no backbone, so this stays cheap and network-free. The
-one fact worth surfacing here (see ``docs/PROVENANCE.md`` D7): under a
+one fact worth surfacing here (see ``legacy_docs/PROVENANCE.md`` D7): under a
 ``"raw_rad"`` reader (:class:`~kinescore.heads.heteroscedastic.ReadoutV2Head`,
 the GR-1 production family) ``limit_violation_frac``/``limit_excess_rad``
 become *observable* instead of the structural ``null`` a ``"squashed"``
@@ -19,11 +19,12 @@ from __future__ import annotations
 import argparse
 import json
 
+NAME = "describe"
 HELP = "print every metric in a suite: key, units, dt_exponent, direction, PIS membership"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    from kinescore.cli._suites import available_suites
+    from kinescore.bench.suites import available_suites
 
     parser.add_argument("--suite", default="invariant_v1",
                         help=f"suite name (available: {', '.join(available_suites())})")
@@ -59,7 +60,7 @@ def _reader_info(path: str) -> dict:
             "sigma_scale": meta.get("sigma_scale", 1.0),
             "note": ("limit_violation_frac/limit_excess_rad are OBSERVABLE "
                      "under this reader (q_raw is unsquashed, clamp overshoot "
-                     "is the signal) -- see docs/PROVENANCE.md D7. A "
+                     "is the signal) -- see legacy_docs/PROVENANCE.md D7. A "
                      "sigma-gate (drop frames whose predicted aleatoric sigma "
                      "exceeds a threshold) is a caller-supplied "
                      "kinescore.core.scorer.Scorer(gate=...); `kinescore "
@@ -68,17 +69,24 @@ def _reader_info(path: str) -> dict:
         }
     return {
         "path": path,
-        "head_family": "attentive (squashed)",
-        "limit_semantics": "squashed",
-        "note": ("limit_violation_frac/limit_excess_rad are structurally "
-                 "UNOBSERVABLE under this reader (q is squashed into "
-                 "[q_lo, q_hi] by construction) -- reported as null, never "
-                 "0 -- see docs/PROVENANCE.md D7."),
+        "head_family": "attentive (legacy AttentivePoseHead cfg)",
+        "limit_semantics": cfg.get("limit_semantics"),
+        "note": ("this checkpoint's cfg is NOT a ReadoutV2Head cfg -- it is "
+                 "the legacy AttentivePoseHead/PixelPhysicsJudge format "
+                 "(judge_v3l/judge_v3l_mv/judge_reward, or anything written "
+                 "by kinescore.readers.checkpoint.save). That format's only "
+                 "reader (SquashedPoseReader) is no longer part of this "
+                 "package -- see legacy_docs/PROVENANCE.md's D7 addendum -- so "
+                 "`kinescore score --reader <this file>` now raises "
+                 "NotImplementedError rather than building a reader whose "
+                 "limit_violation_frac/limit_excess_rad were structurally "
+                 "UNOBSERVABLE by construction anyway. Retrain via "
+                 "`kinescore train-rawrad`."),
     }
 
 
 def run(args: argparse.Namespace) -> int:
-    from kinescore.cli._suites import get_suite
+    from kinescore.bench.suites import get_suite
 
     suite = get_suite(args.suite)
     metrics = suite.describe()

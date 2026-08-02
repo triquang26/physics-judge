@@ -37,7 +37,8 @@ _SINGLE_VIEW = ViewLayout()
 def run(rows: list[dict], scorer: Any, results_path: str, *,
         resume: bool = False, force: bool = False, max_frames: int = 0,
         view_layout: ViewLayout = _SINGLE_VIEW,
-        progress: ProgressCallback | None = None) -> dict[str, int]:
+        progress: ProgressCallback | None = None,
+        trace_store: Any = None) -> dict[str, int]:
     """Score every row in ``rows`` with ``scorer``, appending to ``results_path``.
 
     Parameters
@@ -69,6 +70,17 @@ def run(rows: list[dict], scorer: Any, results_path: str, *,
         ``scorer.reader`` expects (checked by
         :meth:`~kinescore.core.scorer.Scorer.score`); pass the same
         ``ViewLayout`` used to build the manifest.
+    trace_store:
+        Optional :class:`~kinescore.bench.traces.TraceStore`. ``None`` (the
+        default) is a complete no-op -- ``results.jsonl`` and everything
+        else this function does is byte-identical whether or not a caller
+        ever passes this. When given, every successfully-scored ("ok") row
+        additionally has :func:`~kinescore.bench.traces.clip_traces_from_scored`
+        run against it and, if that produced any traces, appended to the
+        store. A clip that fails to decode/score never reaches this (there
+        is no :class:`~kinescore.core.scorer.ScoredClip` to build traces
+        from), matching ``results.jsonl``'s own "no ``ScoredClip``, no
+        traces" story for a failed row.
 
     Returns
     -------
@@ -91,39 +103,54 @@ def run(rows: list[dict], scorer: Any, results_path: str, *,
     done = store.existing_keys() if resume else set()
 
     n_scored = n_skipped = n_failed = 0
-    for row in rows:
-        key = (row.get("path"), scorer.suite.suite_id, scorer.reader.reader_id)
-        if resume and key in done:
-            n_skipped += 1
-            if progress:
-                progress(row, "skipped")
-            continue
+    try:
+        for row in rows:
+            key = (row.get("path"), scorer.suite.suite_id, scorer.reader.reader_id)
+            if resume and key in done:
+                n_skipped += 1
+                if progress:
+                    progress(row, "skipped")
+                continue
 
-        try:
-            clip = ClipSpec.from_fps(
-                path=row["path"], fps=float(row["fps"]),
-                n_frames=int(row["n_frames"]), width=int(row["w"]),
-                height=int(row["h"]),
-                dt_source=row.get("dt_source", "table"),
-                view_layout=view_layout, codec=row.get("codec"),
-                sha1=row.get("sha1"))
-            frames = load_rgb(clip, max_frames=max_frames)
-            scored = scorer.score(frames, clip)
-        except Exception as exc:  # noqa: BLE001
-            n_failed += 1
-            reason = "".join(
-                traceback.format_exception_only(type(exc), exc)).strip()
-            store.append(failed_record(row, scorer, f"error:{type(exc).__name__}:{reason}"))
-            if progress:
-                progress(row, "failed")
-            continue
+            try:
+                clip = ClipSpec.from_fps(
+                    path=row["path"], fps=float(row["fps"]),
+                    n_frames=int(row["n_frames"]), width=int(row["w"]),
+                    height=int(row["h"]),
+                    dt_source=row.get("dt_source", "table"),
+                    view_layout=view_layout, codec=row.get("codec"),
+                    sha1=row.get("sha1"))
+                frames = load_rgb(clip, max_frames=max_frames)
+                scored = scorer.score(frames, clip)
+            except Exception as exc:  # noqa: BLE001
+                n_failed += 1
+                reason = "".join(
+                    traceback.format_exception_only(type(exc), exc)).strip()
+                store.append(failed_record(row, scorer, f"error:{type(exc).__name__}:{reason}"))
+                if progress:
+                    progress(row, "failed")
+                continue
 
-        record = dict(scored.to_record())
-        record["status"] = "ok"
-        store.append(record)
-        n_scored += 1
-        if progress:
-            progress(row, "ok")
+            record = dict(scored.to_record())
+            record["status"] = "ok"
+            store.append(record)
+            if trace_store is not None:
+                from kinescore.bench.traces import clip_traces_from_scored
+                traces = clip_traces_from_scored(scored)
+                if traces is not None:
+                    trace_store.append(traces)
+            n_scored += 1
+            if progress:
+                progress(row, "ok")
+    finally:
+        # A trace_store batches its durability checkpoints (see
+        # TraceStore.checkpoint's docstring) for throughput -- without this,
+        # up to _ZIP_CHECKPOINT_EVERY clips' worth of traces from the tail
+        # of a run would sit unflushed forever. Runs whether the loop above
+        # finished normally or raised, mirroring `store` (ResultsStore),
+        # which is already durable per-row and needs no equivalent flush.
+        if trace_store is not None:
+            trace_store.close()
 
     return {"n_total": len(rows), "n_scored": n_scored,
             "n_skipped": n_skipped, "n_failed": n_failed}

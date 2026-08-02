@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -75,7 +75,7 @@ SCHEMA_VERSION = 2
 #: additionally fits a per-key median-absolute-deviation floor from the real
 #: data itself and stores ``max(mad, UNIT_FLOORS.get(key, 0.0))``, so a key
 #: not listed here still gets a sane data-driven floor rather than none.
-UNIT_FLOORS: Dict[str, float] = {
+UNIT_FLOORS: dict[str, float] = {
     "rigidity_wobble_mm": 0.5,
     "rigidity_residual_mm": 0.5,
     "mean_jerk_mps3": 1e-3,
@@ -144,22 +144,22 @@ class RealMotionReference:
     """
 
     def __init__(self, *, dt: float, suite_id: str, term_keys: Sequence[str],
-                 inv_baseline: Dict[str, float], floors: Dict[str, float],
-                 quantiles: Dict[str, ArrayLike], feat_mu: ArrayLike,
+                 inv_baseline: dict[str, float], floors: dict[str, float],
+                 quantiles: dict[str, ArrayLike], feat_mu: ArrayLike,
                  feat_cov: ArrayLike, quantity_keys: Sequence[str],
                  n_q: int = 100, schema: int = SCHEMA_VERSION) -> None:
         self.dt = validate_dt(dt)
         self.suite_id = str(suite_id)
-        self.term_keys: Tuple[str, ...] = tuple(term_keys)
-        self.inv_baseline: Dict[str, float] = {k: float(v) for k, v in inv_baseline.items()}
-        self.floors: Dict[str, float] = {k: float(v) for k, v in floors.items()}
-        self.quantiles: Dict[str, np.ndarray] = {
+        self.term_keys: tuple[str, ...] = tuple(term_keys)
+        self.inv_baseline: dict[str, float] = {k: float(v) for k, v in inv_baseline.items()}
+        self.floors: dict[str, float] = {k: float(v) for k, v in floors.items()}
+        self.quantiles: dict[str, np.ndarray] = {
             k: np.array(_as_numpy(v), copy=True) for k, v in quantiles.items()}
         self.feat_mu: np.ndarray = np.array(_as_numpy(feat_mu), copy=True)
         feat_cov_arr = np.array(_as_numpy(feat_cov), copy=True)
         n = self.feat_mu.shape[0]
         self.feat_cov: np.ndarray = feat_cov_arr.reshape(n, n) if n else feat_cov_arr.reshape(0, 0)
-        self.quantity_keys: Tuple[str, ...] = tuple(quantity_keys)
+        self.quantity_keys: tuple[str, ...] = tuple(quantity_keys)
         self.n_q = int(n_q)
         self.schema = int(schema)
 
@@ -168,9 +168,9 @@ class RealMotionReference:
     # ------------------------------------------------------------------
 
     @classmethod
-    def build(cls, suite: MetricSuite, residual_list: List[Dict[str, float]],
-              samples_list: List[Dict[str, ArrayLike]], dt: float,
-              n_q: int = 100) -> "RealMotionReference":
+    def build(cls, suite: MetricSuite, residual_list: list[dict[str, float]],
+              samples_list: list[dict[str, ArrayLike]], dt: float,
+              n_q: int = 100) -> RealMotionReference:
         """Fit a reference from real rollouts' residuals and motion samples.
 
         ``suite`` -- never ``residual_list[0]``/``samples_list[0]`` -- is the
@@ -216,8 +216,8 @@ class RealMotionReference:
                 f"real rollouts are missing quantity keys declared by suite "
                 f"{suite.name!r} ({list(quantity_keys)}) -- {detail}")
 
-        inv_baseline: Dict[str, float] = {}
-        floors: Dict[str, float] = {}
+        inv_baseline: dict[str, float] = {}
+        floors: dict[str, float] = {}
         missing_terms = []
         for k in term_keys:
             vals = [float(r[k]) for r in residual_list
@@ -285,12 +285,12 @@ class RealMotionReference:
     # Group 3: distribution realism (see distances.py for the math)
     # ------------------------------------------------------------------
 
-    def w1(self, samples: Dict[str, ArrayLike], dt: Optional[float] = None,
-           allow_rate_mismatch: bool = False) -> Dict[str, float]:
+    def w1(self, samples: dict[str, ArrayLike], dt: float | None = None,
+           allow_rate_mismatch: bool = False) -> dict[str, float]:
         """Per-quantity 1-Wasserstein distance of ``samples`` to the reference."""
         if dt is not None:
             self.check_rate(dt, allow_rate_mismatch=allow_rate_mismatch)
-        out: Dict[str, float] = {}
+        out: dict[str, float] = {}
         for k, ref_q in self.quantiles.items():
             if k not in samples:
                 continue
@@ -298,14 +298,14 @@ class RealMotionReference:
             out[f"w1_{k}"] = float(np.mean(np.abs(q - ref_q)))
         return out
 
-    def _feat_gaussian(self, samples_list: List[Dict[str, ArrayLike]]):
+    def _feat_gaussian(self, samples_list: list[dict[str, ArrayLike]]):
         feats = np.stack([_feat_vector(s, self.quantity_keys) for s in samples_list])
         mu = feats.mean(axis=0)
         cov = np.cov(feats.T) if feats.shape[0] > 1 else np.zeros_like(self.feat_cov)
         return mu, cov
 
-    def kfd_approx(self, samples_list: List[Dict[str, ArrayLike]],
-                   dt: Optional[float] = None,
+    def kfd_approx(self, samples_list: list[dict[str, ArrayLike]],
+                   dt: float | None = None,
                    allow_rate_mismatch: bool = False) -> float:
         """Kinematic Frechet Distance (eig-approximation) of a SET of rollouts vs real.
 
@@ -318,8 +318,8 @@ class RealMotionReference:
         mu, cov = self._feat_gaussian(samples_list)
         return _kfd_approx(mu, cov, self.feat_mu, self.feat_cov)
 
-    def kfd(self, samples_list: List[Dict[str, ArrayLike]],
-            dt: Optional[float] = None, allow_rate_mismatch: bool = False) -> float:
+    def kfd(self, samples_list: list[dict[str, ArrayLike]],
+            dt: float | None = None, allow_rate_mismatch: bool = False) -> float:
         """Exact Kinematic Frechet Distance (``scipy.linalg.sqrtm``; needs ``kinescore[bench]``)."""
         if dt is not None:
             self.check_rate(dt, allow_rate_mismatch=allow_rate_mismatch)
@@ -355,7 +355,7 @@ class RealMotionReference:
         torch.save(payload, path)
 
     @classmethod
-    def load(cls, path: str, dt: Optional[float] = None) -> "RealMotionReference":
+    def load(cls, path: str, dt: float | None = None) -> RealMotionReference:
         """Deserialize.
 
         A schema-2 file records its own ``dt`` and is loaded as-is (passing
@@ -389,7 +389,7 @@ class RealMotionReference:
                    quantity_keys=d["quantity_keys"], n_q=d["n_q"], schema=schema)
 
     @classmethod
-    def _load_legacy(cls, d: dict, dt: Optional[float]) -> "RealMotionReference":
+    def _load_legacy(cls, d: dict, dt: float | None) -> RealMotionReference:
         required = {"inv_baseline", "quantiles", "feat_mu", "feat_cov", "quantity_keys", "n_q"}
         missing = required - set(d)
         if missing:

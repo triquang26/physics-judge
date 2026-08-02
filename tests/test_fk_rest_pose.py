@@ -10,7 +10,7 @@ regenerate the golden numbers" -- which would silently fold the exact defect
 this benchmark exists to catch (rigidity_residual_mm = 15.37 on a rigid,
 motionless arm that merely opens its gripper; see
 ``kinescore.robots.franka.constants.RIGID_BONE_MIN_M`` and
-``docs/PROVENANCE.md``, D9) into the new baseline without anyone deciding to
+``legacy_docs/PROVENANCE.md``, D9) into the new baseline without anyone deciding to
 accept that. Pinning the literal values here, with a diff in version control
 as the only way to change them, turns "regenerate the golden file" from a
 silent reflex into something a reviewer has to consciously approve.

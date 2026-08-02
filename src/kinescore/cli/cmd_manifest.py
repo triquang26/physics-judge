@@ -19,6 +19,7 @@ import glob
 import os
 import sys
 
+NAME = "manifest"
 HELP = "discover clips under a directory into a probed manifest"
 
 

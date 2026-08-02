@@ -27,7 +27,7 @@ buffers using ``GR1FK.link_frames`` and exposes them for the ``COLLIDERS`` /
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -36,8 +36,8 @@ import torch.nn as nn
 __all__ = ["RobotColliders"]
 
 # GR-1 defaults; override via ctor for another robot.
-_BODY_CORE_LINKS: Tuple[str, ...] = ("torso_link", "base_link", "head_pitch_link")
-_FOOT_LINKS: Tuple[str, ...] = ("left_foot_roll_link", "right_foot_roll_link")
+_BODY_CORE_LINKS: tuple[str, ...] = ("torso_link", "base_link", "head_pitch_link")
+_FOOT_LINKS: tuple[str, ...] = ("left_foot_roll_link", "right_foot_roll_link")
 
 
 def _rpy_to_matrix(rpy: np.ndarray) -> np.ndarray:
@@ -85,10 +85,10 @@ class RobotColliders(nn.Module):
                  n_cyl_spheres: int = 3) -> None:
         super().__init__()
         self.urdf_path = str(urdf_path)
-        self.body_links: List[str] = list(body_core_links)
-        self.foot_links: List[str] = list(foot_links)
+        self.body_links: list[str] = list(body_core_links)
+        self.foot_links: list[str] = list(foot_links)
         root = ET.parse(self.urdf_path).getroot()
-        links = {l.get("name"): l for l in root.findall("link")}
+        links = {link_el.get("name"): link_el for link_el in root.findall("link")}
 
         # ── body-core collision spheres (link frame) ─────────────────────────
         centers, radii, sph_link = [], [], []
@@ -107,9 +107,12 @@ class RobotColliders(nn.Module):
                 zs = np.linspace(-L / 2, L / 2, n_cyl_spheres)
                 for z in zs:
                     c = (T @ np.array([0, 0, z, 1.0]))[:3]
-                    centers.append(c); radii.append(r); sph_link.append(li)
+                    centers.append(c)
+                    radii.append(r)
+                    sph_link.append(li)
             elif sph is not None:
-                centers.append(T[:3, 3]); radii.append(float(sph.get("radius")))
+                centers.append(T[:3, 3])
+                radii.append(float(sph.get("radius")))
                 sph_link.append(li)
             else:
                 raise ValueError(f"link '{name}' collision is not cylinder/sphere")
@@ -119,24 +122,25 @@ class RobotColliders(nn.Module):
         self.register_buffer("sphere_link", torch.tensor(sph_link, dtype=torch.long))
 
         # ── per-link mass + inertial CoM (for balance) ───────────────────────
-        avail = set(name for name in links)
         mass_links, masses, coms = [], [], []
-        for name, l in links.items():
-            inert = l.find("inertial")
+        for name, link_el in links.items():
+            inert = link_el.find("inertial")
             if inert is None:
                 continue
             m = inert.find("mass")
             if m is None or float(m.get("value")) <= 0:
                 continue
             com = _origin_T(inert.find("origin"))[:3, 3]
-            mass_links.append(name); masses.append(float(m.get("value"))); coms.append(com)
-        self.mass_links: List[str] = mass_links
+            mass_links.append(name)
+            masses.append(float(m.get("value")))
+            coms.append(com)
+        self.mass_links: list[str] = mass_links
         self.register_buffer("link_mass", torch.tensor(masses, dtype=torch.float32))
         self.register_buffer("link_com", torch.tensor(np.array(coms), dtype=torch.float32))
 
     # ── posing (given per-link SE(3) frames from FK) ─────────────────────────
 
-    def posed_body_spheres(self, frames: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def posed_body_spheres(self, frames: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Body-core spheres in base frame.
 
         ``frames``: ``(B,T,len(body_links),4,4)`` SE(3) of ``self.body_links``.

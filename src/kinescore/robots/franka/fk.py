@@ -49,7 +49,7 @@ lines and the extraction of the module-level constant tables into
 :mod:`kinescore.robots.franka.constants`, so the two ``_PANDA_*`` tuples this
 file references are defined once and shared with
 :mod:`kinescore.robots.franka.spec` rather than copy-pasted. See
-``docs/PROVENANCE.md`` for the reproduced-defect writeup (D9,
+``legacy_docs/PROVENANCE.md`` for the reproduced-defect writeup (D9,
 ``rigidity_residual_mm`` on a gripper open/close) that motivated auditing this
 file in the first place.
 """
@@ -57,7 +57,7 @@ file in the first place.
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Sequence, Tuple
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
@@ -117,7 +117,7 @@ class FrankaFK(nn.Module):
 
     #: Default keypoint link names (``K = 8``). All present in the
     #: ``robot_descriptions`` example-robot-data Panda URDF.
-    KEYPOINT_LINKS: Tuple[str, ...] = KEYPOINT_LINKS
+    KEYPOINT_LINKS: tuple[str, ...] = KEYPOINT_LINKS
 
     def __init__(
         self,
@@ -150,19 +150,19 @@ class FrankaFK(nn.Module):
         self.chain = chain
 
         # Joint ordering reported by the chain (non-fixed joints only).
-        self._chain_joint_names: List[str] = list(chain.get_joint_parameter_names())
+        self._chain_joint_names: list[str] = list(chain.get_joint_parameter_names())
 
         # ---- resolve & validate the keypoint links ---------------------------
         available = set(chain.get_frame_names(exclude_fixed=False))
         self._resolve_ee_link(available)
-        self.keypoint_links: Tuple[str, ...] = self._resolve_keypoint_links(
+        self.keypoint_links: tuple[str, ...] = self._resolve_keypoint_links(
             keypoint_links, available
         )
         self.num_keypoints: int = len(self.keypoint_links)
 
         # ---- register buffers ------------------------------------------------
         joint_limits = torch.tensor(
-            list(zip(_PANDA_JOINT_LOWER, _PANDA_JOINT_UPPER)),
+            list(zip(_PANDA_JOINT_LOWER, _PANDA_JOINT_UPPER, strict=True)),
             dtype=self.dtype,
         )  # (7, 2)
         self.register_buffer("joint_limits", joint_limits)
@@ -198,13 +198,13 @@ class FrankaFK(nn.Module):
 
     def _resolve_keypoint_links(
         self, requested: Sequence[str], available: set
-    ) -> Tuple[str, ...]:
+    ) -> tuple[str, ...]:
         """Map each requested keypoint link to one present in the URDF.
 
         Keeps the requested order and length (``K``) so downstream tensor shapes
         stay stable; substitutes via :data:`_LINK_FALLBACKS` for missing links.
         """
-        resolved: List[str] = []
+        resolved: list[str] = []
         for name in requested:
             if name in available:
                 resolved.append(name)
@@ -227,7 +227,7 @@ class FrankaFK(nn.Module):
             resolved.append(substitute)
         return tuple(resolved)
 
-    def _compute_rest_bones(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _compute_rest_bones(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Build ``bone_pairs`` / ``bone_lengths`` from the rest (zero) pose.
 
         Consecutive keypoints are treated as a parent->child kinematic chain,
@@ -301,7 +301,7 @@ class FrankaFK(nn.Module):
         return th
 
     def _stack_keypoints(
-        self, transforms: Dict[str, "object"], n: int
+        self, transforms: dict[str, object], n: int
     ) -> torch.Tensor:
         """Stack keypoint-link translations into ``(n, K, 3)`` (differentiable)."""
         cols = [
@@ -338,7 +338,7 @@ class FrankaFK(nn.Module):
 
     def forward_transforms(
         self, q: torch.Tensor, gripper: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Keypoint-link positions AND rotation matrices in the base frame.
 
         Same forward pass as :meth:`forward`, but also returns each keypoint
@@ -360,7 +360,7 @@ class FrankaFK(nn.Module):
         R = M[..., :3, :3].reshape(b, t, self.num_keypoints, 3, 3)
         return P, R
 
-    def ee_pose(self, q: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def ee_pose(self, q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward kinematics of :attr:`ee_link` as ``(position, rotvec)``.
 
         The gripper is held closed (it does not affect arm-link poses).

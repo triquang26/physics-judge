@@ -49,13 +49,20 @@ def add_common_arguments(parser: argparse.ArgumentParser, *,
                              " by kinescore.robots.available_robots())")
     parser.add_argument("--reader", required=require_reader,
                         help="pose-reader checkpoint path, as written by "
-                             "`kinescore train` / kinescore.readers.checkpoint.save")
+                             "`kinescore train-rawrad` / "
+                             "kinescore.readers.checkpoint_v2.save")
     parser.add_argument("--suite", default="invariant_v1",
                         help="metric suite name (default: invariant_v1)")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--n-views", type=int, default=1,
                         help="camera views packed into every clip's frame "
-                             "height (must match the reader's checkpoint)")
+                             "(must match the reader's checkpoint). Assumes "
+                             "a plain HEIGHT stack -- there is no CLI flag "
+                             "yet for a non-default ViewLayout.packing "
+                             "(width stack / 2x2 grid / a panel subset, see "
+                             "kinescore.core.clip.ViewLayout); scoring a clip "
+                             "packed another way from the CLI needs those "
+                             "passed programmatically instead")
     parser.add_argument("--view-order", default=None,
                         help="comma-separated view names, e.g. "
                              "exterior_1,exterior_2,wrist_left (length must "
@@ -128,27 +135,24 @@ def build_scorer(args: argparse.Namespace, view_layout):
     """Compose robot + checkpoint reader + suite into a :class:`~kinescore.core.scorer.Scorer`.
 
     ``--reader`` auto-routes via :func:`kinescore.readers.checkpoint.load_reader`,
-    which inspects the checkpoint's ``cfg`` dict (no model construction yet)
-    and picks the matching family:
+    which inspects the checkpoint's ``cfg`` dict (no model construction yet):
+    a :class:`~kinescore.heads.heteroscedastic.ReadoutV2Head` cfg (the GR-1
+    production checkpoint, ``readout_v2_gr1.pt``, or any checkpoint written by
+    ``kinescore train-rawrad``) routes to a
+    :class:`~kinescore.readers.checkpoint_v2.ReadoutV2PoseReader` (sigma
+    calibration + the FK/aux dimension split -- see that module's docstring
+    for why GR-1's 29-dim head output cannot feed
+    ``GR1Spec.forward_transforms`` directly). Anything else -- notably a
+    legacy :class:`~kinescore.heads.attentive.AttentivePoseHead` cfg
+    (``judge_v3l``/``judge_v3l_mv``/``judge_reward``) -- raises
+    ``NotImplementedError``: that format's only reader
+    (``SquashedPoseReader``) was removed (see ``legacy_docs/PROVENANCE.md``'s D7
+    addendum), so there is no reader left to build for it.
 
-    * an :class:`~kinescore.heads.attentive.AttentivePoseHead` cfg
-      (``judge_v3l``/``judge_v3l_mv``/``judge_reward``, or anything saved by
-      ``kinescore.readers.checkpoint.save``) -> a
-      :class:`~kinescore.readers.squashed.SquashedPoseReader`.
-    * a :class:`~kinescore.heads.heteroscedastic.ReadoutV2Head` cfg (the GR-1
-      production checkpoint, ``readout_v2_gr1.pt``) -> a
-      :class:`~kinescore.readers.checkpoint_v2.ReadoutV2PoseReader` (sigma
-      calibration + the FK/aux dimension split -- see that module's
-      docstring for why GR-1's 29-dim head output cannot feed
-      ``GR1Spec.forward_transforms`` directly).
-
-    Both branches return a ready-to-score
-    :class:`~kinescore.core.reader.PoseReader`; this function no longer needs
-    to know which family a checkpoint is. See
-    ``readers/checkpoint.py::load_reader``'s own docstring for the routing
-    rule itself.
+    See ``readers/checkpoint.py::load_reader``'s own docstring for the
+    routing rule itself.
     """
-    from kinescore.cli._suites import get_suite
+    from kinescore.bench.suites import get_suite
     from kinescore.core.scorer import Scorer
     from kinescore.readers import checkpoint as ckpt_mod
     from kinescore.robots import get_robot

@@ -46,7 +46,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -84,6 +84,21 @@ SOURCES_B: tuple[str, ...] = (
     "eval/bench/manifest.py",
     "eval/bench/scoring.py",
     "eval/bench/stats.py",
+    # -- added porting torque_frac_rated / noise_floor / anchor rate-matching,
+    # see docs/PROVENANCE.md's entries for these five: the inverse-dynamics
+    # torque ruler, the paired re-encode noise floor, and the real-footage
+    # frame-rate-matching stages the public kinescore page depends on but the
+    # packaged library previously lacked.
+    "scripts/gr1/54_torque_feasibility.py",
+    "scripts/bench/33_noise_floor.py",
+    "scripts/bench/15_prepare_real_anchor.py",
+    "scripts/bench/34_prepare_real_dm16.py",
+    # cited for rationale only, i.e. why real footage must be rate-matched at
+    # all, not the source of any ported arithmetic -- hashed anyway rather
+    # than declared in CITED_NOT_PORTED, since its rationale is quoted
+    # near-verbatim in cli/cmd_anchor.py's module docstring and a hash makes
+    # that quote checkable against a specific version of the file.
+    "scripts/bench/32_non_inversion.py",
 )
 
 #: Top-level entries of A that are known to be environment-specific (symlinks
@@ -298,6 +313,11 @@ def snapshot(source_a: Path, source_b: Path, out_dir: Path) -> list[SourceFile]:
         "models/evaluation/motion_reference.py": "kinescore.reference",
         "models/kinematics/gr1_fk.py": "kinescore.robots.gr1",
         "models/physics/smoothness.py": "kinescore.metrics (not yet wired to a fixture)",
+        "scripts/gr1/54_torque_feasibility.py": "kinescore.metrics.torque + kinescore.robots.inertia",
+        "scripts/bench/33_noise_floor.py": "kinescore.bench.noise_floor",
+        "scripts/bench/15_prepare_real_anchor.py": "kinescore.cli.cmd_anchor",
+        "scripts/bench/34_prepare_real_dm16.py": "kinescore.cli.cmd_anchor",
+        "scripts/bench/32_non_inversion.py": "not ported (rationale only, quoted in kinescore.cli.cmd_anchor's module docstring)",
     }
     with manifest_path.open("w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
@@ -369,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"B (fkjepa) has_citable_commit={b['has_citable_commit']}: "
           f"{b.get('note', '')}")
     never_copy = (args.out_dir / "never_copy.txt").read_text().splitlines()
-    n_entries = len([l for l in never_copy if l and not l.startswith("#")])
+    n_entries = len([line for line in never_copy if line and not line.startswith("#")])
     print(f"never_copy.txt: {n_entries} entries")
     return 0
 

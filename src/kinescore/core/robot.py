@@ -4,7 +4,7 @@ A ``RobotSpec`` is everything the metric layer needs to know about a robot:
 forward kinematics, joint limits, which keypoints form rigid bones, and which
 optional capabilities (collision geometry, a support polygon) it has.
 
-Adding a robot means implementing this protocol -- see ``docs/ADDING_A_ROBOT.md``.
+Adding a robot means implementing this protocol -- see ``docs/ARCHITECTURE.md#adding-a-robot``.
 Two implementations ship: Franka Panda (7-DOF arm, bolted to a table) and
 Fourier GR-1 (bimanual humanoid with feet, so balance is meaningful).
 
@@ -16,7 +16,7 @@ keypoints coincide when the gripper is closed, so that bone has a rest length of
 **0.0 m**, and its realised length is just the gripper opening. A perfectly
 rigid, motionless arm that merely opens its gripper measured
 ``rigidity_residual_mm = 15.37`` -- grasping clips were penalised for grasping
-(defect D9, reproduced; see ``docs/PROVENANCE.md``).
+(defect D9, reproduced; see ``legacy_docs/PROVENANCE.md``).
 
 Implementations therefore expose two bone sets: ``bone_pairs`` (everything, for
 reproducing legacy numbers) and ``rigid_bone_pairs`` (degenerate bones dropped),
@@ -24,7 +24,7 @@ which is what the metrics use by default.
 """
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 
@@ -89,13 +89,13 @@ class RobotSpec(Protocol):
     rigid_bone_lengths: torch.Tensor
     q_lo: torch.Tensor
     q_hi: torch.Tensor
-    vel_limits: Optional[torch.Tensor]
-    effort_limits: Optional[torch.Tensor]
+    vel_limits: torch.Tensor | None
+    effort_limits: torch.Tensor | None
     capabilities: frozenset[str]
-    urdf_sha256: Optional[str]
+    urdf_sha256: str | None
 
     def forward_kinematics(self, q: torch.Tensor,
-                           aux: Optional[Any] = None) -> torch.Tensor:
+                           aux: Any | None = None) -> torch.Tensor:
         """``(B,T,n_joints) -> (B,T,K,3)`` keypoint positions in metres.
 
         ``aux`` carries robot-specific extras that are not joint angles -- the
@@ -104,7 +104,7 @@ class RobotSpec(Protocol):
         """
         ...
 
-    def forward_transforms(self, q: torch.Tensor, aux: Optional[Any] = None
+    def forward_transforms(self, q: torch.Tensor, aux: Any | None = None
                            ) -> tuple[torch.Tensor, torch.Tensor]:
         """``-> (P (B,T,K,3), R (B,T,K,3,3))`` positions and link rotations."""
         ...

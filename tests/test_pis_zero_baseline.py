@@ -20,8 +20,7 @@ import numpy as np
 import pytest
 
 from kinescore.reference.fingerprint import RealMotionReference
-from kinescore.reference.normalize import (DEFAULT_TOL, _key_score,
-                                            invariance_score)
+from kinescore.reference.normalize import DEFAULT_TOL, _key_score, invariance_score
 
 
 def _reference(inv_baseline, floors, term_keys=None):

@@ -3,9 +3,42 @@
 All notable changes to `kinescore` are documented here. This project does not
 yet have prior published releases — `0.1.0` is the initial standalone
 extraction from two research codebases (`Marionette-ciasc`, `Marionette-fkjepa`),
-merged and fixed as one benchmark. See [docs/PROVENANCE.md](docs/PROVENANCE.md)
-for the full defect-by-defect writeup (was/is/why/test/legacy-compat) behind
-every entry below.
+merged and fixed as one benchmark. See
+[legacy_docs/PROVENANCE.md](legacy_docs/PROVENANCE.md) for the full
+defect-by-defect writeup (was/is/why/test/legacy-compat) behind every entry
+below.
+
+## Unreleased
+
+### Docs and scripts reorganised
+
+- `docs/` cut down to six current files (`README.md` at the repo root plus
+  `docs/{DATA_PREP,TRAINING,BENCHMARKING,ARCHITECTURE,METRICS}.md`), written
+  fresh against the post-refactor code: `core/registry.py`'s `Registry[T]`,
+  `core/contracts.py`'s five extension points, the `axes.robot` (not
+  `axes.embodiment`) benchmark matrix, `aloha_bimanual` as a fourth
+  registered robot, and the D7-addendum removal of the squashed pose-reader
+  path. Everything else (`PROVENANCE`, `DECISIONS`, `RATE_POLICY`, `SCHEMA`,
+  `ADDING_A_ROBOT`, `ADDING_A_METRIC`, `ADDING_ALOHA_NOTES`, `MODIFYING`,
+  `REGENERATING_GOLDENS`, plus the now-superseded `DATA_LAYOUT`/`USAGE`)
+  moved verbatim to `legacy_docs/` — a decision record, not usage docs (see
+  `legacy_docs/README.md`).
+- `scripts/` created: the ad-hoc Airbot MMK2 cache/train runbooks that were
+  living outside the repo (`kinescore_runtime/*.sh`) were copied in, renamed
+  from opaque `run_cache_camhigh_A.sh`-style names to
+  `<verb>_<robot>_<dataset>_<variant>.sh`, and given a What/Why/Input/Output
+  header — the rename surfaced that "camhigh A/B" is not two physical
+  cameras but one camera spelled two ways (`cam_head_rgb` vs `cam_high_rgb`)
+  across two source-dataset naming conventions, and that the squashed-head
+  training script among them calls a CLI subcommand (`kinescore train`) that
+  no longer exists. `scripts/convert_lerobot_to_train.py` is new: a single
+  LeRobot v1/v2 -> kinescore-training-contract converter covering all three
+  robots with training data (`fourier_gr1`, `airbot_mmk2`, `aloha_bimanual`),
+  verified against real on-disk data for each.
+- `tools/check_repo_hygiene.py` gained a fifth check
+  (`check_scripts_have_header`) enforcing the header above on every file in
+  `scripts/`, with `tests/test_repo_hygiene.py` coverage for both the
+  positive and negative case.
 
 ## 0.1.0
 
