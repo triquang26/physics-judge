@@ -126,7 +126,7 @@ derivative unchanged, and every registered metric must numerically match the
 | [`docs/TRAINING.md`](docs/TRAINING.md) | per robot: cache → train → the mm acceptance gate |
 | [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) | config → run → CSV/traces → how to read the numbers, the frame-rate rules |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | the OOP map; how to add a robot / metric / data source |
-| [`docs/METRICS.md`](docs/METRICS.md) | every metric: formula, units, `dt` exponent, what it misses |
+| [`docs/METRICS.md`](docs/METRICS.md) | the 5 direct-keypoint violation detectors (current), then every `kinescore.metrics` registry metric the CLI runs: formula, units, `dt` exponent, what it misses |
 | [`legacy_docs/`](legacy_docs/) | decision record — why things are the way they are, not how to use them today |
 
 ## Scope, honestly
