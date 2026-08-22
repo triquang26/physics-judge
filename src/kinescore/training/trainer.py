@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import glob
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -92,6 +93,7 @@ class TrainConfig:
     weight_decay: float = 1e-4
     huber_beta: float = 0.05
     seed: int = 0
+    read_workers: int = 4
     eval_every: int = 500
     log_every: int = 200
     device: str = "cpu"
@@ -162,6 +164,8 @@ class KeypointTrainer:
         self.reader_id = reader_id
         self.view_layout = view_layout
         self.cfg = cfg or TrainConfig()
+        self._readers = ThreadPoolExecutor(
+            max_workers=max(1, self.cfg.read_workers))
 
     @staticmethod
     def n_keypoints(robot: RobotSpec) -> int:
@@ -257,6 +261,10 @@ class KeypointTrainer:
         ``feat`` is ``(B, W, n_tokens, D)``, ``target`` ``(B, W, K, 3)``, and
         ``mask`` ``(B, W)`` with ``1`` on real frames.
 
+        Which windows to take is decided first, on this thread and from
+        ``gen``, so a seed reproduces a run whatever the reads do; only the
+        reads themselves are spread across ``cfg.read_workers``.
+
         Windows stay in the cache's own half precision until they reach the
         device, and are widened there. A batch of three-panel windows is
         gigabytes, so casting on the host would double both the copy held in
@@ -264,7 +272,7 @@ class KeypointTrainer:
         either way.
         """
         window = self.cfg.window_size
-        fb, yb, mb = [], [], []
+        picks = []
         for _ in range(self.cfg.batch_size):
             ei = int(torch.randint(0, len(episodes), (1,), generator=gen))
             path, target = episodes[ei]
@@ -272,7 +280,13 @@ class KeypointTrainer:
             w = min(window, t)
             s = (0 if t <= window
                  else int(torch.randint(0, t - window, (1,), generator=gen)))
-            f = self.read_window(path, s, w)
+            picks.append((path, target, s, w))
+
+        reads = list(self._readers.map(
+            lambda p: self.read_window(p[0], p[2], p[3]), picks))
+
+        fb, yb, mb = [], [], []
+        for f, (_path, target, s, w) in zip(reads, picks, strict=True):
             y = target[s:s + w]
             if w < window:
                 f = torch.cat([f, f.new_zeros(window - w, *f.shape[1:])])

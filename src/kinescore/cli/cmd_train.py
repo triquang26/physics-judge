@@ -20,6 +20,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--lr-late", type=float, default=5e-4)
     parser.add_argument("--lr-step-at", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--read-workers", type=int, default=4,
+                        help="threads reading token windows for one batch")
     parser.add_argument("--eval-every", type=int, default=500)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--device", default="cuda")
@@ -70,6 +72,7 @@ def run(args: argparse.Namespace) -> int:
         steps=args.steps, batch_size=args.batch_size,
         window_size=args.window_size, lr=args.lr, lr_late=args.lr_late,
         lr_step_at=args.lr_step_at, seed=args.seed,
+        read_workers=args.read_workers,
         eval_every=args.eval_every, log_every=args.log_every,
         device=args.device)
     trainer = KeypointTrainer(head, robot, reader_id=reader.reader_id,
