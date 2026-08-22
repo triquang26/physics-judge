@@ -158,30 +158,64 @@ na_cells:
   # it N/A is honest.
   - {generator: dreamgen, robot: franka_panda, horizon: non_makovian}
 
-# See the header comment above for the full reasoning behind each
-# reader/reader_status/reader_note value below -- summary:
-#   fourier_gr1    -- accepted,     val 19.19mm
-#   airbot_mmk2    -- accepted,     val 19.52mm (raw_rad; NOT the legacy squashed airbot_mmk2.pt)
-#   franka_panda   -- failing_gate, val 162.10mm vs ~19-20mm accepted band
-#   aloha_bimanual -- untrained,    no checkpoint exists; reader is null, never a phantom filename
+# REPINNED 2026-08-06 onto the DIRECT-KEYPOINT family. Every joint-angle
+# (raw_rad / ReadoutV2) checkpoint this block used to name -- `humanoid.pt`,
+# `airbot_mmk2_rawrad.pt`, `single_arm_rawrad.pt` -- was deleted from
+# $KINESCORE_CKPT_DIR that day, on the decision that direct-keypoint is the
+# only reader family kept. What each robot points at now is the one
+# direct-keypoint checkpoint that exists for the domain THIS config's cells
+# are in: ctrlworld is multiview for airbot/franka/aloha, and fourier_gr1's
+# cells here are singleview, so the (robot, domain) keying that made a blind
+# repin ambiguous resolves uniquely per robot in this file. A config whose
+# cells were in the other domain would need the other checkpoint --
+# `robots.<robot>` has one reader slot and no view axis, so that is a schema
+# limit to remember, not a bug here.
+#
+# `load_reader` routes both families off the checkpoint's own cfg
+# (`readers/loader.py` checks `is_direct_keypoint_cfg` FIRST). What these
+# readers cannot do is the joint-space half of the metric suite:
+# `limit_semantics="keypoints"` means `q`/`q_raw` are None by construction,
+# so every joint-angle metric reports unavailable-with-a-reason rather than a
+# number. The five `kinescore.violations` detectors run off keypoints alone
+# and are unaffected -- they are the live scoring path.
+#
+# val mm below is KEYPOINT error and is NOT comparable to the 19-20mm band
+# the deleted raw_rad readers were gated on (different target: 3-D points vs
+# joint angles through FK).
+#
+# The singleview direct-keypoint run does not go through this config at all
+# -- see `scripts/score_singleview_direct.py`, which resolves its own cells
+# and carries the same iter pins as `sources` below.
 robots:
-  fourier_gr1:    {spec: fourier_gr1,    reader: humanoid.pt,           assets: grx}
-  airbot_mmk2:    {spec: airbot_mmk2,    reader: airbot_mmk2_rawrad.pt, assets: airbot_mmk2}
+  fourier_gr1:
+    spec: fourier_gr1
+    reader: fourier_gr1_singleview_kp.pt
+    assets: grx
+    reader_note: >-
+      direct-keypoint, K=12, 1-view, val 45.31mm. The only fourier_gr1
+      checkpoint that exists; this config's fourier_gr1 cells are singleview,
+      so it is also the right one.
+  airbot_mmk2:
+    spec: airbot_mmk2
+    reader: airbot_mmk2_ctrlworld_kp.pt
+    assets: airbot_mmk2
+    reader_note: "direct-keypoint, K=12, 3-view, val 11.31mm"
   franka_panda:
     spec: franka_panda
-    reader: single_arm_rawrad.pt
+    reader: franka_panda_ctrlworld_kp.pt
     assets: franka
-    reader_status: failing_gate
     reader_note: >-
-      val 162.10mm vs ~19-20mm accepted band (fourier_gr1/airbot_mmk2) --
-      FAILED acceptance gate; kept as an explicit, visibly-flagged control,
-      not hidden and not silently presented as accepted.
+      direct-keypoint, K=8, 3-view, val 23.22mm. Replaces
+      `single_arm_rawrad.pt`, whose 162.10mm failing_gate status is now moot
+      -- that file was deleted, not re-gated.
   aloha_bimanual:
     spec: aloha_bimanual
-    reader: null
+    reader: aloha_bimanual_ctrlworld_kp.pt
     assets: aloha
-    reader_status: untrained
-    reader_note: "no ALOHA checkpoint has been trained yet"
+    reader_note: >-
+      direct-keypoint, K=18, 3-view, val 23.15mm. No longer untrained -- the
+      singleview sibling `aloha_bimanual_singleview_kp.pt` (73.69mm) is the
+      one `configs/benchmark_bimanual.yaml` wants instead.
 
 # Per-generator discovery pins. view_dir is the LITERAL on-disk directory
 # name -- both "singleview" and "single_view" exist as different directories

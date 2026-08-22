@@ -657,12 +657,21 @@ class TestShippedConfigsReadersAreResolvableOrHonestlyMarked:
                 continue
             ck = torch.load(str(ckpt_path), map_location="cpu")
             cfg = dict(ck.get("cfg", {}))
-            if not checkpoint_v2.is_readout_v2_cfg(cfg):
+            # Both families `kinescore.readers.load_reader` can route, in the
+            # order that function checks them. This used to accept only
+            # ReadoutV2 -- written before the direct-keypoint branch existed,
+            # so once configs/benchmark.yaml was repinned onto
+            # `*_kp.pt` checkpoints (2026-08-06) the check was failing
+            # checkpoints load_reader loads perfectly well. The point of this
+            # assertion is "the config cannot name something load_reader
+            # would refuse", not "the config must name one specific family".
+            if not (checkpoint_v2.is_direct_keypoint_cfg(cfg)
+                    or checkpoint_v2.is_readout_v2_cfg(cfg)):
                 problems.append(
                     f"{source_name}: robots.{robot}.reader="
-                    f"{robot_cfg.reader!r} exists but is not a ReadoutV2Head "
-                    f"checkpoint -- load_reader would raise "
-                    f"NotImplementedError on it")
+                    f"{robot_cfg.reader!r} exists but is neither a "
+                    f"direct-keypoint nor a ReadoutV2Head checkpoint -- "
+                    f"load_reader would raise NotImplementedError on it")
         return problems
 
     def test_discovery_finds_at_least_the_two_known_configs(self):

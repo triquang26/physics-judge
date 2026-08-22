@@ -7,6 +7,46 @@ Legend: **DONE** · **RUNNING** · **BLOCKED** · **TODO**
 
 ---
 
+## 2026-08-06 — everything below this block predates the direct-keypoint switch
+
+The board from "The three readers" down describes the **joint-angle
+(`raw_rad`) era**. Those checkpoints no longer exist: `humanoid.pt`,
+`airbot_mmk2_rawrad.pt`, `single_arm_rawrad.pt`, `airbot_mmk2.pt` and every
+`*_ctrlworld_rawrad.pt` / `*_singleview_rawrad.pt` were deleted from
+`$KINESCORE_CKPT_DIR`, so tasks 1-8 below cannot be re-run as written and
+their val-mm numbers (19.19 / 19.52 / 162.10 / 56.66) describe files that are
+gone. Kept as the decision record, not as instructions.
+
+Current state — five direct-keypoint readers, all on disk, all uploaded to
+the `twanghcmut/result-video-bench` bucket under `direct_keypoint/`:
+
+| reader | K | val mm | cells scored |
+|---|---|---|---|
+| `airbot_mmk2_ctrlworld_kp.pt` | 12 | 11.31 | `humanoid/**/multiview/ctrlworld/{mak,non}` |
+| `franka_panda_ctrlworld_kp.pt` | 8 | 23.22 | `single_arm/**/multiview/ctrlworld/{mak,non}` |
+| `aloha_bimanual_ctrlworld_kp.pt` | 18 | 23.15 | `bimanual/**/multiview/ctrlworld/{mak,non}` |
+| `fourier_gr1_singleview_kp.pt` | 12 | 45.31 | `humanoid/**/singleview/{dreamdojo,dreamgen}/{mak,non}` |
+| `aloha_bimanual_singleview_kp.pt` | 18 | 73.69 | `bimanual/**/singleview/{dreamdojo,dreamgen}/{mak,non}` |
+
+The singleview half is scored by `scripts/score_singleview_direct.py` (this
+repo); the ctrlworld half was scored by an ad-hoc driver that was never
+committed. Live status per cell lives in the bucket's
+`direct_keypoint/STATUS.md`, not here.
+
+Two things this switch left open, neither of them a code bug:
+
+* `configs/benchmark.yaml`'s `robots:` block still names the deleted
+  joint-angle checkpoints and therefore cannot load. It is NOT mechanically
+  repinnable — the direct-keypoint checkpoints are keyed by (robot, domain)
+  and that schema has one reader slot per robot with no view axis. See the
+  warning block above `robots:` in that file.
+* The FK-based 31-metric suite has no reader at all now: keypoint
+  checkpoints carry `limit_semantics="keypoints"`, so `q`/`q_raw` are `None`
+  and every joint-space metric is unavailable by construction. The five
+  `kinescore.violations` detectors are the live scoring path.
+
+---
+
 ## The three readers, and who trained what
 
 The goal is one reader per robot, then score. Two of the three were **not**

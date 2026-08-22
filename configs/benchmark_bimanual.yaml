@@ -101,18 +101,25 @@ na_cells:
   # NOT a blanket dreamgen x multiview exclusion -- see point 2 above:
   # bimanual's multiview/dreamgen tree is real, unlike the other robots'.
 
-# No ALOHA checkpoint has been trained yet -- reader is null with
-# reader_status: untrained (kinescore.bench.config.RobotConfig), never a
-# filename like `bimanual.pt` that does not exist on disk (see
-# configs/benchmark.yaml's header comment for the phantom-checkpoint bug
-# this schema field exists to prevent).
+# An ALOHA reader now exists (2026-08-06): the DIRECT-KEYPOINT
+# `aloha_bimanual_singleview_kp.pt`, K=18, 1-view, val 73.69mm keypoint
+# error. This file's cells are singleview, so the singleview
+# checkpoint is the right one of the two (the other,
+# `aloha_bimanual_ctrlworld_kp.pt`, is 3-view and is what
+# configs/benchmark.yaml pins). Keypoint val mm is NOT comparable to the
+# 19-20mm band the deleted raw_rad readers were gated on -- different
+# target. `reader_status` is back to its default `accepted`; the previous
+# `untrained` + null (the anti-phantom-path state, see
+# configs/benchmark.yaml's header) no longer describes reality.
 robots:
   aloha_bimanual:
     spec: aloha_bimanual
-    reader: null
+    reader: aloha_bimanual_singleview_kp.pt
     assets: aloha
-    reader_status: untrained
-    reader_note: "no ALOHA checkpoint has been trained yet"
+    reader_note: >-
+      direct-keypoint, K=18, 1-view (cam_high), val 73.69mm -- the weakest of
+      the five readers: one camera on a 14-DoF bimanual arm. Its own error is
+      a floor under anything scored with it.
 
 # iter: bimanual repeats the SAME iter for both horizons (rather than a flat
 # top-level string) so the mapping's shape stays uniform --

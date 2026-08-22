@@ -57,22 +57,41 @@ robot or dataset, see [docs/TRAINING.md](docs/TRAINING.md).
 
 ## Supported robots
 
-| Robot | Registry key | DOF predicted | Cameras | Balance | Checkpoint | Status |
-|---|---|---|---|---|---|---|
-| Fourier GR-1 | `fourier_gr1` | 17 (arms + waist; legs/hands logged, not predicted) | 1 ego-view | yes — feet, CoM margin | `humanoid.pt` | **accepted**, val 19.19mm |
-| Airbot MMK2 | `airbot_mmk2` | 12 (bimanual arms) | 1 (multi-cam data prepared, not yet cached) | n/a — bolted down | `airbot_mmk2_rawrad.pt` | **accepted**, val 19.52mm |
-| Franka Panda | `franka_panda` | 7 + gripper (aux) | 1 or 3 (multiview) | n/a — bolted down | `single_arm_rawrad.pt` | **rejected**, val 162.10mm — retrain in progress, see [docs/TRAINING.md](docs/TRAINING.md) |
-| ALOHA bimanual | `aloha_bimanual` | 12 (bimanual arms; grippers via `aux`) | 4 | n/a — table-mounted | none trained yet | robot registered, not yet scored |
-| `Synthetic2R` | `synthetic_2r` | 2 | — | n/a | closed-form, no checkpoint | test/reference fixture only |
+**As of 2026-08-06 every checkpoint on disk is a direct-keypoint one.** The
+joint-angle (`raw_rad` / `ReadoutV2Head` → `HeteroscedasticPoseReader`,
+`limit_semantics="raw_rad"`) checkpoints — `humanoid.pt`,
+`airbot_mmk2_rawrad.pt`, `single_arm_rawrad.pt` and every
+`*_ctrlworld_rawrad.pt` — were deleted from `$KINESCORE_CKPT_DIR` on the
+decision that direct-keypoint is the only family kept. The *code* for both
+families is still here and `load_reader` still routes both (see below); what
+is gone is the weights.
 
-Every real robot uses the **same** reader family
-(`ReadoutV2Head` → `HeteroscedasticPoseReader`, `limit_semantics="raw_rad"`) —
-an earlier "squashed head" family that could never make joint-limit
-violations observable was removed entirely, not kept as a second option; see
-[legacy_docs/PROVENANCE.md](legacy_docs/PROVENANCE.md)'s "D7 addendum".
+| Robot | Registry key | Keypoints K | Cameras | Checkpoint | val mm |
+|---|---|---|---|---|---|
+| Airbot MMK2 | `airbot_mmk2` | 12 | 3 (ctrlworld multiview) | `airbot_mmk2_ctrlworld_kp.pt` | **11.31** |
+| Franka Panda | `franka_panda` | 8 | 3 (ctrlworld multiview) | `franka_panda_ctrlworld_kp.pt` | **23.22** |
+| ALOHA bimanual | `aloha_bimanual` | 18 | 3 (ctrlworld multiview) | `aloha_bimanual_ctrlworld_kp.pt` | **23.15** |
+| Fourier GR-1 | `fourier_gr1` | 12 | 1 ego-view | `fourier_gr1_singleview_kp.pt` | 45.31 |
+| ALOHA bimanual | `aloha_bimanual` | 18 | 1 (`cam_high`) | `aloha_bimanual_singleview_kp.pt` | 73.69 |
+| `Synthetic2R` | `synthetic_2r` | — | — | closed-form, no checkpoint | test/reference fixture only |
+
+A direct-keypoint reader regresses 3-D keypoints and runs **no FK and no URDF
+clamp** (`kinescore.readers.direct_keypoint`), which is what lets it see limb
+geometry a joint→FK reader is structurally blind to — under FK, limb lengths
+are fixed by construction so rigidity is identically zero. The tradeoff is
+that `limit_semantics="keypoints"` has no joint angles, so the FK-based
+31-metric suite does not apply to these checkpoints; the five detectors in
+`kinescore.violations` do, and they are what the published runs use. Each
+of the two 12k-step head families also has a 40k sibling (`*_kp40.pt`) on
+disk; the 40k retrain scored **worse** (under-converged cosine LR), so 12k is
+canonical and `*_kp40.pt` is kept only as the control.
+
 `--reader` auto-routes from the checkpoint's own `cfg`
-(`kinescore.readers.loader.load_reader`). Adding a robot is implementing one
-protocol — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#adding-a-robot).
+(`kinescore.readers.loader.load_reader`, direct-keypoint branch first).
+Adding a robot is implementing one protocol — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#adding-a-robot). The removed
+"squashed head" family is a third, fully deleted one — see
+[legacy_docs/PROVENANCE.md](legacy_docs/PROVENANCE.md)'s "D7 addendum".
 
 ## What each metric does *not* detect
 
