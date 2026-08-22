@@ -34,7 +34,14 @@ with no header is refused outright. The stage also asserts
 annotation, reporting the count.
 
 Re-running is cheap: already-cached episodes are counted and skipped unless
-`--overwrite` is passed.
+`--overwrite` is passed. Finishing an interrupted cache is therefore just the
+same command again.
+
+Training reads the cache, not the tree, so a cache that stopped early would
+train on whatever episodes reached it and report an ordinary-looking
+validation number. `kinescore train` compares the two per split and refuses
+when the cache is short, naming both counts; `--allow-partial-cache` proceeds
+anyway.
 
 ## Stage 2 — train
 

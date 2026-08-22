@@ -121,3 +121,62 @@ class TestScorePreconditions:
 
         assert "no reader checkpoint at" in str(e.value)
         assert str(tmp_path / "nope.pt") in str(e.value)
+
+
+class TestPartialCacheGate:
+    """Training reads the cache, so a cache short of the tree is refused.
+
+    An interrupted cache stage leaves a directory that loads and trains
+    perfectly well on whatever episodes reached it, reporting a validation
+    number that looks ordinary. The counts are compared instead.
+    """
+
+    def _tree(self, root, n_train, n_val):
+        for split, n in (("train", n_train), ("val", n_val)):
+            (root / "videos" / split).mkdir(parents=True)
+            (root / "annotation" / split).mkdir(parents=True)
+            for i in range(n):
+                (root / "videos" / split / f"ep{i}.mp4").write_bytes(b"")
+                (root / "annotation" / split / f"ep{i}.json").write_text("{}")
+
+    def _cache(self, root, n_train, n_val):
+        for split, n in (("train", n_train), ("val", n_val)):
+            (root / split).mkdir(parents=True)
+            for i in range(n):
+                (root / split / f"ep{i}.pt").write_bytes(b"")
+
+    def test_a_complete_cache_reports_nothing(self, tmp_path):
+        from kinescore.cli.cmd_train import _uncached
+
+        self._tree(tmp_path / "tree", 8, 2)
+        self._cache(tmp_path / "cache", 8, 2)
+
+        assert _uncached(tmp_path / "tree", tmp_path / "cache") == []
+
+    def test_a_short_split_is_named_with_both_counts(self, tmp_path):
+        from kinescore.cli.cmd_train import _uncached
+
+        self._tree(tmp_path / "tree", 8, 2)
+        self._cache(tmp_path / "cache", 5, 2)
+
+        assert _uncached(tmp_path / "tree", tmp_path / "cache") == [
+            ("train", 5, 8)]
+
+    def test_every_short_split_is_reported(self, tmp_path):
+        from kinescore.cli.cmd_train import _uncached
+
+        self._tree(tmp_path / "tree", 8, 4)
+        self._cache(tmp_path / "cache", 5, 1)
+
+        assert _uncached(tmp_path / "tree", tmp_path / "cache") == [
+            ("train", 5, 8), ("val", 1, 4)]
+
+    def test_a_clip_without_an_annotation_is_not_expected_in_the_cache(
+            self, tmp_path):
+        from kinescore.cli.cmd_train import _uncached
+
+        self._tree(tmp_path / "tree", 8, 2)
+        (tmp_path / "tree" / "annotation" / "train" / "ep7.json").unlink()
+        self._cache(tmp_path / "cache", 7, 2)
+
+        assert _uncached(tmp_path / "tree", tmp_path / "cache") == []

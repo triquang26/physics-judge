@@ -27,9 +27,30 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--limit", type=int, default=0,
                         help="cap episodes loaded per split (0 = all)")
+    parser.add_argument("--allow-partial-cache", action="store_true",
+                        help="train even though the cache holds fewer "
+                             "episodes than the train tree")
     parser.add_argument("--out", default=None,
                         help="checkpoint path (default: the reader's own)")
     add_config_arguments(parser)
+
+
+def _uncached(tree, cache_dir) -> list[tuple[str, int, int]]:
+    """Splits whose cache holds fewer episodes than the tree supervises.
+
+    An episode is cacheable when its clip has an annotation -- the same
+    condition the cache stage applies -- so a split that matches is complete
+    and one that does not names both counts.
+    """
+    short = []
+    for split in ("train", "val"):
+        want = sum(
+            1 for clip in (tree / "videos" / split).glob("*.mp4")
+            if (tree / "annotation" / split / f"{clip.stem}.json").exists())
+        have = len(list((cache_dir / split).glob("*.pt")))
+        if have < want:
+            short.append((split, have, want))
+    return short
 
 
 def run(args: argparse.Namespace) -> int:
@@ -56,6 +77,17 @@ def run(args: argparse.Namespace) -> int:
         raise SystemExit(
             f"no cache at {cache_dir} -- run `kinescore cache --reader "
             f"{reader.reader_id}` first")
+    if not args.allow_partial_cache:
+        short = _uncached(reader.train_tree, cache_dir)
+        if short:
+            detail = ", ".join(f"{split}: {n_cached}/{n_want} cached"
+                               for split, n_cached, n_want in short)
+            raise SystemExit(
+                f"cache under {cache_dir} is short of the train tree "
+                f"({detail}) -- training reads the cache, so it would silently "
+                f"run on the episodes that happen to be there. Re-run "
+                f"`kinescore cache --reader {reader.reader_id}` to finish it, "
+                f"or pass --allow-partial-cache to train on what exists")
 
     started = now()
     robot = get_robot(reader.robot)
