@@ -256,6 +256,12 @@ class KeypointTrainer:
 
         ``feat`` is ``(B, W, n_tokens, D)``, ``target`` ``(B, W, K, 3)``, and
         ``mask`` ``(B, W)`` with ``1`` on real frames.
+
+        Windows stay in the cache's own half precision until they reach the
+        device, and are widened there. A batch of three-panel windows is
+        gigabytes, so casting on the host would double both the copy held in
+        memory and the bytes crossing the bus, for a conversion that is exact
+        either way.
         """
         window = self.cfg.window_size
         fb, yb, mb = [], [], []
@@ -266,7 +272,7 @@ class KeypointTrainer:
             w = min(window, t)
             s = (0 if t <= window
                  else int(torch.randint(0, t - window, (1,), generator=gen)))
-            f = self.read_window(path, s, w).float()
+            f = self.read_window(path, s, w)
             y = target[s:s + w]
             if w < window:
                 f = torch.cat([f, f.new_zeros(window - w, *f.shape[1:])])
@@ -274,7 +280,7 @@ class KeypointTrainer:
             fb.append(f)
             yb.append(y)
             mb.append(torch.cat([torch.ones(w), torch.zeros(window - w)]))
-        return (torch.stack(fb).to(device), torch.stack(yb).to(device),
+        return (torch.stack(fb).to(device).float(), torch.stack(yb).to(device),
                 torch.stack(mb).to(device))
 
     def compute_loss(self, pred: torch.Tensor, target: torch.Tensor,
@@ -307,7 +313,7 @@ class KeypointTrainer:
             t = int(target.shape[0])
             pred = torch.cat([
                 head(self.read_window(path, i, chunk)
-                     .float().to(device)[None])[0].cpu()
+                     .to(device)[None].float())[0].cpu()
                 for i in range(0, t, chunk)
             ])[:t]
             e = (pred - target).norm(dim=-1)
