@@ -57,6 +57,8 @@ anyway.
 | `--eval-every` / `--log-every` | `500` / `100` |
 | `--device` | `cuda` |
 | `--limit` | `0` (cap episodes per split) |
+| `--read-workers` | `4` threads reading a batch's windows |
+| `--allow-partial-cache` | off (see stage 1) |
 | `--out` | the reader's own checkpoint path |
 
 Before anything is built, the command checks `configs/robots.yaml`'s declared
@@ -77,6 +79,12 @@ to fit in memory.
 
 `kinescore cache`, by contrast, holds one episode's frames at a time and is
 bounded by `--frame-chunk` on the GPU side.
+
+That trade puts a step's cost in the reads rather than the arithmetic: the
+head's forward and backward pass is a few hundredths of a second at
+`--batch-size 32`, while fetching that batch's windows is seconds. The reads
+are issued concurrently for this reason, and `--read-workers` is the knob that
+matters for throughput — past the core count it stops helping.
 
 ## Targets
 
