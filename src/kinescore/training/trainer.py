@@ -12,11 +12,11 @@ contiguous within one episode. Each step samples one window per batch slot,
 zero-padding an episode shorter than the window and masking the padding out of
 the loss.
 
-Tokens are memory-mapped, not read into anonymous memory. A three-panel episode
-is a few hundred megabytes and a split runs to hundreds of episodes, so a whole
-split does not fit an ordinary allocation; mapped pages are page cache, which
-the kernel reclaims under pressure, and each step touches only the windows it
-samples.
+Only the target is held in memory. Tokens stay on disk: a three-panel episode
+is a few hundred megabytes and a split runs to hundreds of episodes, far past
+any ordinary allocation, so a window is memory-mapped, copied, and released at
+the point it is sampled. Resident token memory is therefore one batch of
+windows regardless of how large the split is.
 """
 from __future__ import annotations
 
@@ -42,9 +42,9 @@ __all__ = [
 #: Annotation key holding the logged joint array.
 DEFAULT_JOINT_KEY = "observation.state.joint_position"
 
-#: One loaded episode: ``(feat (T, n_tokens, D) fp16, target (T, K, 3) fp32)``.
-#: ``feat`` is memory-mapped and read-only; slice it before writing.
-Episode = tuple[torch.Tensor, torch.Tensor]
+#: One loaded episode: ``(cache_path, target (T, K, 3) fp32)``. Tokens are read
+#: from ``cache_path`` a window at a time; see :meth:`KeypointTrainer.read_window`.
+Episode = tuple[str, torch.Tensor]
 
 
 def _episode_sort_key(path: str) -> tuple[int, object]:
@@ -185,8 +185,9 @@ class KeypointTrainer:
         """Load ``{cache_root}/{split}/*.pt`` with their annotations.
 
         An episode is kept when it has a matching annotation whose
-        ``joint_source`` is ``"real"``; tokens and joints are truncated to
-        their common frame count and the target is built once, here.
+        ``joint_source`` is ``"real"``. The target is built once, here, and
+        truncated to the frame count the tokens and joints share; the tokens
+        themselves are left on disk and read per window during the run.
 
         Parameters
         ----------
@@ -220,12 +221,11 @@ class KeypointTrainer:
             if not os.path.exists(ap):
                 continue
             label = assert_real_joint_source(ap)
-            feat, _header = load_cache(fp, reader_id=self.reader_id,
-                                       view_layout=self.view_layout,
-                                       mmap=True)
+            _feat, header = load_cache(fp, reader_id=self.reader_id,
+                                       view_layout=self.view_layout, mmap=True)
             q = torch.tensor(np.asarray(label[joint_key], dtype=np.float32))
-            t = min(int(feat.shape[0]), int(q.shape[0]))
-            episodes.append((feat[:t], self.build_target(q[:t])))
+            t = min(int(header.n_frames), int(q.shape[0]))
+            episodes.append((fp, self.build_target(q[:t])))
             if progress and len(episodes) % 200 == 0:
                 progress(f"[{split}] loaded {len(episodes)}/{len(files)} episodes")
 
@@ -236,6 +236,18 @@ class KeypointTrainer:
         if progress:
             progress(f"[{split}] {len(episodes)} episodes loaded")
         return episodes
+
+    def read_window(self, path: str, start: int, size: int) -> torch.Tensor:
+        """``(size, n_tokens, D)`` tokens from ``path``, starting at ``start``.
+
+        The file is mapped, the window copied out, and the mapping dropped, so
+        resident token memory never grows past the windows currently in hand.
+        A window running past the end of the episode comes back short; the
+        caller pads it and masks the padding out of the loss.
+        """
+        feat, _header = load_cache(path, reader_id=self.reader_id,
+                                   view_layout=self.view_layout, mmap=True)
+        return feat[start:start + size].clone()
 
     def _sample_windows(self, episodes: list[Episode], *, gen: torch.Generator,
                         device: torch.device
@@ -249,12 +261,12 @@ class KeypointTrainer:
         fb, yb, mb = [], [], []
         for _ in range(self.cfg.batch_size):
             ei = int(torch.randint(0, len(episodes), (1,), generator=gen))
-            feat, target = episodes[ei]
-            t = feat.shape[0]
+            path, target = episodes[ei]
+            t = int(target.shape[0])
             w = min(window, t)
             s = (0 if t <= window
                  else int(torch.randint(0, t - window, (1,), generator=gen)))
-            f = feat[s:s + w].float()
+            f = self.read_window(path, s, w).float()
             y = target[s:s + w]
             if w < window:
                 f = torch.cat([f, f.new_zeros(window - w, *f.shape[1:])])
@@ -282,20 +294,22 @@ class KeypointTrainer:
     def evaluate(self, head: KeypointHead, episodes: list[Episode]) -> dict:
         """Root-mean-square per-keypoint 3-D error, millimetres.
 
-        Each episode is read whole, in chunks of ``head.t_max`` so a clip
-        longer than the positional table still scores.
+        Each episode is scored in chunks of ``head.t_max``, so a clip longer
+        than the positional table still scores and only one chunk of tokens is
+        resident at a time.
         """
         was_training = head.training
         head.eval()
         device = next(head.parameters()).device
         chunk = max(1, head.t_max)
         se, n = 0.0, 0
-        for feat, target in episodes:
-            f = feat.float().to(device)[None]
+        for path, target in episodes:
+            t = int(target.shape[0])
             pred = torch.cat([
-                head(f[:, i:i + chunk])[0].cpu()
-                for i in range(0, f.shape[1], chunk)
-            ])
+                head(self.read_window(path, i, chunk)
+                     .float().to(device)[None])[0].cpu()
+                for i in range(0, t, chunk)
+            ])[:t]
             e = (pred - target).norm(dim=-1)
             se += float((e ** 2).sum())
             n += e.numel()

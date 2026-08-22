@@ -113,8 +113,33 @@ class TestLoop:
         trainer = _trainer(robot)
         episodes = trainer.load_episodes(cache_root, annotation_root, "train")
         assert len(episodes) == 4
-        feat, target = episodes[0]
-        assert feat.shape[0] == target.shape[0]
+        path, target = episodes[0]
+        assert path.endswith(".pt")
+        assert trainer.read_window(path, 0, target.shape[0]).shape[0] == target.shape[0]
+
+    def test_read_window_returns_only_the_window(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        path, target = trainer.load_episodes(
+            cache_root, annotation_root, "train")[0]
+        assert trainer.read_window(path, 1, 3).shape[0] == 3
+
+    def test_read_window_past_the_end_comes_back_short(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        path, target = trainer.load_episodes(
+            cache_root, annotation_root, "train")[0]
+        n = int(target.shape[0])
+        assert trainer.read_window(path, n - 2, 10).shape[0] == 2
+
+    def test_read_window_is_writable(self, tmp_path, robot):
+        # The mapped file is read-only; the copy handed back must not be.
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        path, _target = trainer.load_episodes(
+            cache_root, annotation_root, "train")[0]
+        w = trainer.read_window(path, 0, 2)
+        w += 1.0
 
     def test_an_empty_split_is_an_error_not_an_empty_run(self, tmp_path, robot):
         (tmp_path / "cache" / "train").mkdir(parents=True)
