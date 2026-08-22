@@ -69,3 +69,55 @@ class TestParser:
 def _required_args(name: str) -> list[str]:
     """The minimum arguments a stage needs to parse."""
     return {"cache": ["--reader", "r"], "train": ["--reader", "r"]}.get(name, [])
+
+
+class TestScorePreconditions:
+    """``score`` names the missing thing and the command that makes it.
+
+    Both checks run before the backbone, the robot or a single clip is
+    touched, so a run that cannot succeed says why in a line rather than
+    surfacing a loader traceback.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _paths(self, tmp_path, monkeypatch):
+        for key in ("KINESCORE_DATA_ROOT", "KINESCORE_CACHE_DIR",
+                    "KINESCORE_CKPT_DIR", "KINESCORE_ASSETS"):
+            monkeypatch.setenv(key, str(tmp_path / key.lower()))
+
+    def _args(self, **over):
+        import argparse
+
+        from kinescore.registry.cells import (
+            DEFAULT_CELLS_PATH,
+            DEFAULT_ROBOTS_PATH,
+        )
+        from kinescore.registry.views import DEFAULT_VIEWS_PATH
+
+        base = {
+            "cell": "single_arm.mv3_row.ctrlworld", "list": False,
+            "videos": None, "checkpoint": None, "out": None,
+            "calibration_clips": 24, "percentile": 99.0, "max_frames": 0,
+            "limit": 0, "device": "cpu", "views": str(DEFAULT_VIEWS_PATH),
+            "robots": str(DEFAULT_ROBOTS_PATH),
+            "cells": str(DEFAULT_CELLS_PATH),
+        }
+        return argparse.Namespace(**{**base, **over})
+
+    def test_an_untrained_reader_names_the_train_command(self):
+        from kinescore.cli import cmd_score
+
+        with pytest.raises(SystemExit) as e:
+            cmd_score.run(self._args())
+
+        assert "kinescore train --reader franka_panda.mv3_row" in str(e.value)
+
+    def test_a_missing_checkpoint_is_reported_before_anything_is_built(
+            self, tmp_path):
+        from kinescore.cli import cmd_score
+
+        with pytest.raises(SystemExit) as e:
+            cmd_score.run(self._args(checkpoint=str(tmp_path / "nope.pt")))
+
+        assert "no reader checkpoint at" in str(e.value)
+        assert str(tmp_path / "nope.pt") in str(e.value)

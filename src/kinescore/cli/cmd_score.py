@@ -43,6 +43,7 @@ def _clips(root: str, limit: int) -> list[str]:
 
 def run(args: argparse.Namespace) -> int:
     import json
+    import os
 
     import torch
 
@@ -70,10 +71,16 @@ def run(args: argparse.Namespace) -> int:
     if cell.status:
         raise SystemExit(f"cell {cell.cell_id!r}: {cell.status}")
 
+    checkpoint = args.checkpoint or str(cell.reader.checkpoint_path)
+    if not os.path.exists(checkpoint):
+        raise SystemExit(
+            f"no reader checkpoint at {checkpoint} -- run "
+            f"`kinescore train --reader {cell.reader.reader_id}` first, or "
+            f"pass --checkpoint")
+
     started = now()
     layout = cell.view.layout()
     robot = get_robot(cell.robot)
-    checkpoint = args.checkpoint or str(cell.reader.checkpoint_path)
     reader = load_reader(
         checkpoint, robot=robot, view_layout=layout, device=args.device,
         reader_id=cell.reader.reader_id,
@@ -104,11 +111,11 @@ def run(args: argparse.Namespace) -> int:
     videos = args.videos or str(cell.score_tree)
     clips = _clips(videos, args.limit)
     if not clips:
-        raise SystemExit(f"no *.mp4 under {videos}")
+        raise SystemExit(
+            f"no *.mp4 under {videos} -- put this cell's generated clips there,"
+            f" or point --videos at the directory holding them")
 
     out_dir = args.out or str(cell.output_dir)
-    import os
-
     os.makedirs(out_dir, exist_ok=True)
     results_path = os.path.join(out_dir, "results.jsonl")
     n_failed = 0
