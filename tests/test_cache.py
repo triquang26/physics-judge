@@ -52,6 +52,30 @@ class TestRoundTrip:
         write_cache(path, torch.zeros(1, 12, 8, dtype=torch.float16), _header())
         assert load_cache(path)[0].shape == (1, 12, 8)
 
+    def test_mmap_read_matches_ordinary_read(self, tmp_path):
+        feat = torch.randn(6, 12, 8, dtype=torch.float16)
+        path = str(tmp_path / "ep0.pt")
+        write_cache(path, feat, _header())
+
+        mapped, header = load_cache(path, mmap=True)
+        assert torch.equal(mapped, feat)
+        assert header == _header()
+
+    def test_mmap_read_still_checks_the_header(self, tmp_path):
+        path = str(tmp_path / "ep0.pt")
+        write_cache(path, torch.zeros(1, 12, 8, dtype=torch.float16), _header())
+        with pytest.raises(ValueError):
+            load_cache(path, reader_id="aloha_bimanual.mv3_row", mmap=True)
+
+    def test_mmap_slice_is_writable_once_copied(self, tmp_path):
+        # The trainer slices a window and calls .float(); that copy must be
+        # writable even though the mapped tensor behind it is not.
+        path = str(tmp_path / "ep0.pt")
+        write_cache(path, torch.ones(6, 12, 8, dtype=torch.float16), _header())
+        window = load_cache(path, mmap=True)[0][:4].float()
+        window += 1.0
+        assert float(window[0, 0, 0]) == 2.0
+
     def test_unknown_header_fields_are_dropped(self, tmp_path):
         path = str(tmp_path / "ep0.pt")
         payload = {"feat": torch.zeros(1, 12, 8), "header": _header().as_dict()}

@@ -186,16 +186,27 @@ def write_cache(out_path: str, feat: torch.Tensor, header: CacheHeader) -> None:
 
 def load_cache(path: str, *, reader_id: str | None = None,
                view_layout: ViewLayout | None = None,
-               backbone: str | None = None
+               backbone: str | None = None, mmap: bool = False
                ) -> tuple[torch.Tensor, CacheHeader]:
     """Read a cache file, checking its header against what the caller expects.
+
+    Parameters
+    ----------
+    mmap:
+        Memory-map the token tensor instead of reading it into anonymous
+        memory. One three-panel episode is a few hundred megabytes, so a
+        caller holding a whole split resident cannot fit an ordinary
+        allocation; mapped pages are page cache, which the kernel reclaims
+        under pressure rather than the allocation being killed. The returned
+        tensor is read-only, so slice it before writing.
 
     Raises
     ------
     ValueError
         If the file carries no header, or the header disagrees.
     """
-    payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload = torch.load(path, map_location="cpu", weights_only=False,
+                         mmap=mmap)
     if (not isinstance(payload, dict) or "header" not in payload
             or "feat" not in payload):
         raise ValueError(

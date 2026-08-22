@@ -6,11 +6,17 @@ the ``(T, K, 3)`` points the head learns to read off pixels. Forward kinematics
 therefore runs once per episode at load time and never again -- the head that
 ships has no kinematic chain in it.
 
-Episodes stay whole in memory rather than being flattened into a frame pool:
-the head's temporal stage attends across a window, so it needs frames that
-really are contiguous within one episode. Each step samples one window per
-batch slot, zero-padding an episode shorter than the window and masking the
-padding out of the loss.
+Episodes stay whole rather than being flattened into a frame pool: the head's
+temporal stage attends across a window, so it needs frames that really are
+contiguous within one episode. Each step samples one window per batch slot,
+zero-padding an episode shorter than the window and masking the padding out of
+the loss.
+
+Tokens are memory-mapped, not read into anonymous memory. A three-panel episode
+is a few hundred megabytes and a split runs to hundreds of episodes, so a whole
+split does not fit an ordinary allocation; mapped pages are page cache, which
+the kernel reclaims under pressure, and each step touches only the windows it
+samples.
 """
 from __future__ import annotations
 
@@ -37,6 +43,7 @@ __all__ = [
 DEFAULT_JOINT_KEY = "observation.state.joint_position"
 
 #: One loaded episode: ``(feat (T, n_tokens, D) fp16, target (T, K, 3) fp32)``.
+#: ``feat`` is memory-mapped and read-only; slice it before writing.
 Episode = tuple[torch.Tensor, torch.Tensor]
 
 
@@ -214,7 +221,8 @@ class KeypointTrainer:
                 continue
             label = assert_real_joint_source(ap)
             feat, _header = load_cache(fp, reader_id=self.reader_id,
-                                       view_layout=self.view_layout)
+                                       view_layout=self.view_layout,
+                                       mmap=True)
             q = torch.tensor(np.asarray(label[joint_key], dtype=np.float32))
             t = min(int(feat.shape[0]), int(q.shape[0]))
             episodes.append((feat[:t], self.build_target(q[:t])))
