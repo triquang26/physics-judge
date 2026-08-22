@@ -1,22 +1,12 @@
 """ffprobe the ground truth, and never let a config value overrule it silently.
 
-This module is the fix for defect D3. The source's manifest builder
-(``Marionette-fkjepa/eval/bench/manifest.py``) called :func:`ffprobe` on every
-clip, read ``w``/``h``/``n_frames`` off the probe result -- and then
-*overwrote* ``fps`` with whatever a hand-maintained per-family config table
-said, discarding the probed value outright. The config file itself carries the
-scar tissue from this: one entry reads ``dreamgen: 16.0  # PROBED: ... NOT 10
-fps``, i.e. someone had already been bitten by a stale table entry and left a
-comment instead of fixing the code path that let it happen.
-
-The fix is not "trust the probe instead of the table" -- a table can be right
-when a probe's container timestamps are lying (rare, but it happens with some
-encoders). The fix is that **both are always available and are cross-checked**:
-:func:`resolve_timebase` always calls :func:`ffprobe`, and if a table/CLI value
-is also given, disagreement beyond ``probe_tolerance`` is a hard error naming
-the file and both numbers, not a silent override in either direction. Whichever
-value is used ends up recorded in :attr:`~kinescore.core.clip.ClipSpec.dt_source`,
-so the provenance survives into every downstream row.
+A declared frame rate and a probed one are always cross-checked, never
+substituted for one another: :func:`resolve_timebase` always calls
+:func:`ffprobe`, and a table or CLI value disagreeing beyond
+``probe_tolerance`` is a hard error naming the file and both numbers. Whichever
+value is used is recorded in
+:attr:`~kinescore.core.clip.ClipSpec.dt_source`, so the provenance survives
+into every downstream row.
 """
 from __future__ import annotations
 
@@ -26,20 +16,12 @@ from kinescore.core.clip import ClipSpec, DtSource, TimebaseError, ViewLayout
 
 __all__ = ["ffprobe", "resolve_timebase"]
 
-#: ViewLayout is a frozen dataclass, so one shared instance is a safe default
-#: (linters flag a bare ``ViewLayout()`` call in a signature on principle,
-#: since most default-arg calls build a *mutable* object shared across calls;
-#: this one is immutable, but a module-level singleton is clearer than
-#: silencing the lint rule inline).
+#: ``ViewLayout`` is frozen, so one shared instance is a safe default.
 _SINGLE_VIEW = ViewLayout()
 
 
 def ffprobe(path: str) -> dict[str, object]:
     """Probe one video file -> ``{"w","h","codec","n_frames","fps"}``.
-
-    Ported from ``Marionette-fkjepa/eval/bench/manifest.py``'s ``ffprobe``
-    verbatim (only the API boundary changes: it was a private module helper
-    there, a public function here). It already did the right thing:
 
     * ``n_frames`` prefers the container's ``nb_frames`` tag; when that tag is
       missing or ``"N/A"`` (common for some VP9/webm and a few mp4 muxers), it
@@ -95,11 +77,8 @@ def resolve_timebase(path: str, fps_arg: float | None = None,
     """Probe ``path`` and build its :class:`ClipSpec`, cross-checking any override.
 
     ``fps_arg`` / ``dt_arg`` model a CLI override for one run; ``fps_table``
-    models a per-family/per-method config lookup the caller has already
-    resolved for this specific file (e.g. ``bench.manifest``'s discovery
-    plugin knows "this clip belongs to the dreamgen family" and looks up
-    ``fps_table["dreamgen"]`` itself -- this function only needs the resulting
-    number, not the whole table).
+    models a per-model config lookup the caller has already resolved for this
+    specific file -- this function needs the resulting number, not the table.
 
     Parameters
     ----------
@@ -132,9 +111,7 @@ def resolve_timebase(path: str, fps_arg: float | None = None,
     TimebaseError
         If ``fps_arg``/``dt_arg``/``fps_table`` disagree with the probed fps
         beyond ``probe_tolerance``, or if neither an override nor a usable
-        probed fps is available. This is the D3 fix: a wrong table entry now
-        fails loudly, naming the file and both values, instead of silently
-        winning over what the file actually is.
+        probed fps is available.
     """
     if fps_arg is not None and dt_arg is not None:
         raise ValueError(
@@ -175,9 +152,8 @@ def resolve_timebase(path: str, fps_arg: float | None = None,
             raise TimebaseError(
                 f"{path}: {source} claims fps={candidate} but ffprobe measured "
                 f"fps={probed_fps} (relative error {rel_err:.1%} > tolerance "
-                f"{probe_tolerance:.1%}). This is defect D3: a stale config "
-                f"table entry silently overriding the probed frame rate. "
-                f"Fix the table, or pass the correct --fps/--dt explicitly.")
+                f"{probe_tolerance:.1%}). Fix the declared rate, or pass the "
+                f"correct --fps/--dt explicitly.")
         fps = candidate
 
     return ClipSpec.from_fps(

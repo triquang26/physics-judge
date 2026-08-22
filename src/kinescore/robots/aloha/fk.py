@@ -1,9 +1,8 @@
 """Differentiable ALOHA bimanual forward kinematics: two 6-DOF arms + grippers.
 
 Wraps a ``pytorch_kinematics`` chain built from ``aloha_bimanual.urdf`` (two
-Interbotix vx300s arms merged under a synthetic ``world`` root -- see
-``KINESCORE_ASSETS/aloha/urdf/`` and ``legacy_docs/ADDING_ALOHA_NOTES.md`` for the
-asset provenance). Structurally this mirrors
+Interbotix vx300s arms merged under a synthetic ``world`` root; see
+``KINESCORE_ASSETS/aloha/urdf/``). Structurally this mirrors
 :class:`~kinescore.robots.airbot_mmk2.fk.AirbotMMK2FK` (two independent arm
 chains, one predicted-joint vector, per-side keypoint extraction via
 :mod:`kinescore.robots.base`) with one addition Airbot MMK2 has no use for:

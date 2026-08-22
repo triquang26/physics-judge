@@ -16,13 +16,9 @@ Arm geometry is NOT baked in here: the arms are represented at runtime as capsul
 along the FK keypoint chain (see :class:`MechanicalFeasibility`), so they move with
 ``q`` differentiably.
 
-Provenance
-----------
-Ported **verbatim** from ``models/physics/robot_colliders.py`` (Marionette-fkjepa)
--- no line of the class body below is changed; the module docstring above is also
-unchanged. See ``kinescore/robots/gr1/spec.py`` for how ``GR1Spec`` poses these
-buffers using ``GR1FK.link_frames`` and exposes them for the ``COLLIDERS`` /
-``SUPPORT_POLYGON`` capabilities, which is new code, not part of this port.
+:class:`~kinescore.robots.gr1.spec.GR1Spec` poses these buffers using
+``GR1FK.link_frames`` and exposes them for the ``COLLIDERS`` /
+``SUPPORT_POLYGON`` capabilities.
 """
 from __future__ import annotations
 

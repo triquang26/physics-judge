@@ -6,12 +6,10 @@ If ``robot_descriptions`` or ``pytorch_kinematics`` ever changes the Panda
 URDF (a version bump, a mesh/inertial correction, a differently-tuned
 collision model), every keypoint-based value in this repo drifts at once, and
 the natural reflex when a test like this fails is "the URDF changed, let's
-regenerate the golden numbers" -- which would silently fold the exact defect
-this benchmark exists to catch (rigidity_residual_mm = 15.37 on a rigid,
-motionless arm that merely opens its gripper; see
-``kinescore.robots.franka.constants.RIGID_BONE_MIN_M`` and
-``legacy_docs/PROVENANCE.md``, D9) into the new baseline without anyone deciding to
-accept that. Pinning the literal values here, with a diff in version control
+regenerate the golden numbers" -- which would silently fold a gripper-driven
+bone back into the rigid set (see
+``kinescore.robots.franka.constants.RIGID_BONE_MIN_M``) without anyone
+deciding to accept that. Pinning the literal values here, with a diff in version control
 as the only way to change them, turns "regenerate the golden file" from a
 silent reflex into something a reviewer has to consciously approve.
 

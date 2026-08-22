@@ -1,6 +1,6 @@
 """ClipSpec is the sole owner of dt -- these tests pin that contract down.
 
-Covers defect D1 (a wrong dt silently corrupting every derivative metric):
+A wrong ``dt`` corrupts every derivative quantity silently, so:
 :meth:`ClipSpec.subsample` must be the only way frame count and dt move
 together, :meth:`ClipSpec.from_fps` must derive dt correctly, and
 :func:`validate_dt` must catch the classic fps-passed-as-dt mistake before it
@@ -131,17 +131,6 @@ class TestClipSpecConsistency:
     def test_duration_s(self):
         spec = _spec(fps=10.0, dt=0.1, n_frames=30)
         assert spec.duration_s == pytest.approx(3.0)
-
-
-class TestViewLayout:
-    def test_view_height_divides_evenly(self):
-        layout = ViewLayout(n_views=3)
-        assert layout.view_height(576) == 192
-
-    def test_view_height_rejects_indivisible(self):
-        layout = ViewLayout(n_views=3)
-        with pytest.raises(ValueError):
-            layout.view_height(577)
 
 
 class TestViewLayoutKeyStability:

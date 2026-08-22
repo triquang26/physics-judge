@@ -1,26 +1,23 @@
 """Robot embodiment contract.
 
-A ``RobotSpec`` is everything the metric layer needs to know about a robot:
+A ``RobotSpec`` is everything the detectors need to know about a robot:
 forward kinematics, joint limits, which keypoints form rigid bones, and which
 optional capabilities (collision geometry, a support polygon) it has.
 
-Adding a robot means implementing this protocol -- see ``docs/ARCHITECTURE.md#adding-a-robot``.
-Two implementations ship: Franka Panda (7-DOF arm, bolted to a table) and
-Fourier GR-1 (bimanual humanoid with feet, so balance is meaningful).
+Adding a robot means implementing this protocol -- see
+``docs/ARCHITECTURE.md#adding-a-robot``.
 
 The degenerate-bone problem
 ---------------------------
-``bone_pairs`` in the source was simply *consecutive* keypoints, which for the
-Franka put ``panda_leftfinger -> panda_rightfinger`` in the list. Those two
-keypoints coincide when the gripper is closed, so that bone has a rest length of
-**0.0 m**, and its realised length is just the gripper opening. A perfectly
-rigid, motionless arm that merely opens its gripper measured
-``rigidity_residual_mm = 15.37`` -- grasping clips were penalised for grasping
-(defect D9, reproduced; see ``legacy_docs/PROVENANCE.md``).
+A bone between two keypoints that coincide carries no rigidity information.
+The Franka's ``panda_leftfinger -> panda_rightfinger`` pair is the clearest
+case: rest length 0.0 m, realised length equal to the gripper opening, so a
+perfectly rigid arm that merely opens its gripper reads as a rigidity
+violation.
 
-Implementations therefore expose two bone sets: ``bone_pairs`` (everything, for
-reproducing legacy numbers) and ``rigid_bone_pairs`` (degenerate bones dropped),
-which is what the metrics use by default.
+Implementations therefore expose two bone sets: ``bone_pairs`` (everything)
+and ``rigid_bone_pairs`` (degenerate bones dropped), and the rigidity detector
+uses the latter.
 """
 from __future__ import annotations
 
@@ -59,11 +56,10 @@ class RobotSpec(Protocol):
         Ordered link names whose origins become the keypoints ``P``.
     bone_pairs, bone_lengths:
         ``(n_bones,2)`` index pairs into the keypoint axis and their rest
-        lengths in metres. The *full* set, including degenerate bones -- present
-        so legacy numbers stay reproducible.
+        lengths in metres. The full set, degenerate bones included.
     rigid_bone_pairs, rigid_bone_lengths:
         The same with bones shorter than :data:`DEGENERATE_BONE_M` removed.
-        **This is what rigidity metrics use by default.**
+        **This is what the rigidity detector uses.**
     q_lo, q_hi:
         ``(n_joints,)`` joint position limits in radians.
     vel_limits, effort_limits:
@@ -110,7 +106,7 @@ class RobotSpec(Protocol):
         ...
 
     def ee_sites(self) -> tuple[int, ...]:
-        """Keypoint indices treated as end-effectors for smoothness metrics.
+        """Keypoint indices treated as end-effectors.
 
         One index for a single arm, two for a bimanual robot.
         """

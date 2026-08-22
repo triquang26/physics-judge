@@ -1,57 +1,23 @@
-"""Differentiable Franka Panda forward-kinematics for Marionette.
+"""Differentiable Franka Panda forward kinematics.
 
-This module turns a robot *joint-space* description ``(q, gripper)`` into 3-D
-keypoint positions in the robot **base frame** (``panda_link0``), fully
-differentiable w.r.t. ``q`` and ``gripper`` so the kinematics path can be used
-both as a fixed grounding signal (encode observed states into keypoints) and as
-a differentiable decoder for predicted joint angles (``q_hat -> P_hat`` feeding
-:func:`models.kinematics.readout.loss_rigid`).
+Turns ``(q, gripper)`` into 3-D keypoint positions in the robot base frame
+(``panda_link0``), differentiable w.r.t. both.
 
 The chain is built once from the Franka Panda URDF shipped by
-``robot_descriptions`` (the ``example-robot-data`` Panda). That URDF exposes:
+``robot_descriptions`` (the ``example-robot-data`` Panda), which exposes:
 
-* 7 revolute arm joints  : ``panda_joint1 .. panda_joint7``
-* 2 prismatic finger joints: ``panda_finger_joint1`` / ``panda_finger_joint2``
+* 7 revolute arm joints: ``panda_joint1 .. panda_joint7``
+* 2 prismatic finger joints: ``panda_finger_joint1`` /
+  ``panda_finger_joint2``
 * the flange ``panda_link8``, the hand ``panda_hand``, the TCP
-  ``panda_hand_tcp`` and the two finger links ``panda_leftfinger`` /
+  ``panda_hand_tcp``, and the finger links ``panda_leftfinger`` /
   ``panda_rightfinger``.
 
-Robotiq note
-------------
-The project conceptually targets a Robotiq 2F-85 gripper, but the Franka URDF
-from ``robot_descriptions`` ships ``panda_hand`` plus the two Panda finger
-joints. That is sufficient for v1 of the kinematics-grounding branch: the hand
-pose and the two finger keypoints capture the gripper geometry we condition on.
-
-Missing keypoint links
-----------------------
-The contract's :attr:`FrankaFK.KEYPOINT_LINKS` asks for ``panda_grasptarget``,
-which is **not** present in this particular URDF. To keep the keypoint count
-``K`` byte-stable for downstream modules (:class:`FKEncoder` defaults to
-``num_keypoints=8``), any requested link that is absent is transparently
-remapped to the closest physically-equivalent link that *does* exist
-(``panda_grasptarget -> panda_hand_tcp``). The mapping is logged once at build
-time and never changes the tensor shapes the rest of the pipeline sees.
-
-Backward compatibility
-----------------------
-Importing or instantiating this module has no global side effects and does not
-touch any existing training path; it only runs when an integration layer (gated
-behind a config flag, default OFF) explicitly constructs a :class:`FrankaFK`.
-
-Provenance
-----------
-Ported **verbatim** from ``judge/fk.py`` (Marionette-ciasc) /
-``models/kinematics/fk.py`` (Marionette-fkjepa, byte-identical). Per
-``kinescore``'s porting rule for this file, the FK math (every method body
-below) is unchanged character-for-character; the only edits are the import
-lines and the extraction of the module-level constant tables into
-:mod:`kinescore.robots.franka.constants`, so the two ``_PANDA_*`` tuples this
-file references are defined once and shared with
-:mod:`kinescore.robots.franka.spec` rather than copy-pasted. See
-``legacy_docs/PROVENANCE.md`` for the reproduced-defect writeup (D9,
-``rigidity_residual_mm`` on a gripper open/close) that motivated auditing this
-file in the first place.
+:attr:`FrankaFK.KEYPOINT_LINKS` asks for ``panda_grasptarget``, which this
+URDF does not define. To keep the keypoint count ``K`` stable, an absent link
+is remapped to the closest physically equivalent one that does exist
+(``panda_grasptarget -> panda_hand_tcp``); the mapping is logged once at build
+time and never changes tensor shapes.
 """
 
 from __future__ import annotations

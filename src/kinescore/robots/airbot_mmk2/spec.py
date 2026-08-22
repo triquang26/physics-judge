@@ -38,8 +38,7 @@ Reader unit convention: ``limit_semantics = "raw_rad"``
 The pose reader trained against this spec must report the raw predicted
 angle even when it is outside ``[q_lo, q_hi]`` -- never squashed/clipped into
 the legal range. A squashed head makes ``limit_violation_frac`` structurally
-zero regardless of the video (the defect this benchmark's page calls out for
-Franka's ``judge_v3l`` reader); this spec's ``q_lo``/``q_hi`` are meant to be
+zero regardless of the video; this spec's ``q_lo``/``q_hi`` are meant to be
 compared *after* a raw prediction, not used to clip the prediction itself.
 
 Capabilities
@@ -48,11 +47,9 @@ Capabilities
 was resolved -- this URDF is kinematics-only, matching the precedent already
 in this asset tree for ``aloha_bimanual.urdf``). No ``SUPPORT_POLYGON`` (the
 composite URDF has no legs/feet/mobile base -- it would be dishonest to
-report a balance margin for links this class never poses). ``EFFORT_LIMITS``
-*is* declared, unlike GR1 (no effort data in its URDF at all): the source
-``airbot_play_v3_gripper_fixed.urdf`` carries real ``<limit effort="...">``
-values alongside the position limits, so ``effort_proxy`` can compute a real
-number for this robot rather than ``NaN``.
+report a balance margin for links this class never poses).
+``EFFORT_LIMITS`` is declared: ``airbot_play_v3_gripper_fixed.urdf`` carries
+real ``<limit effort="...">`` values alongside the position limits.
 """
 from __future__ import annotations
 

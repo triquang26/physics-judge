@@ -66,9 +66,8 @@ class AirbotMMK2FK(nn.Module):
         this robot yet, so widening here would be an unjustified guess.
     q_vel_max, q_effort_max: ``(12,)``
         Per predicted-joint rated velocity (rad/s) / effort (N.m) from the
-        same ``<limit>`` tags. Unlike GR1 (no effort data at all) and Franka
-        (effort ported from a different upstream), this URDF's ``<limit
-        effort="...">`` values come from the same DISCOVERSE
+        same ``<limit>`` tags. This URDF's ``<limit effort="...">`` values
+        come from the same DISCOVERSE
         ``airbot_play_v3_gripper_fixed.urdf`` source as the position limits,
         so :class:`~kinescore.robots.airbot_mmk2.spec.AirbotMMK2Spec` can
         honestly declare ``Capability.EFFORT_LIMITS``.

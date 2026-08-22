@@ -9,16 +9,10 @@ it lives here once instead of being reimplemented per reader.
 
 Why ``(T,3,H,W)`` is accepted
 -----------------------------
-It is what :func:`kinescore.video.reader.load_rgb` actually returns -- see its
-docstring, which documents ``(T,3,H,W)`` explicitly -- and
-:meth:`kinescore.core.scorer.Scorer.score` hands that tensor straight to
-``reader.read``. Until the first end-to-end scoring run, no caller had ever
-joined those two halves, so the mismatch sat undetected: every clip failed
-with ``expected frames shaped (T,H,W,3) or (B,T,3,H,W), got (49,3,480,640)``
-and, because ``bench/runner.py`` records failures rather than dropping them,
-it surfaced as 24 recorded failures rather than a crash. Accepting the shape
-the decoder documents is the fix, at the one place that already owns this
-conversion, rather than a transpose bolted onto each call site.
+It is what :func:`kinescore.video.reader.load_rgb` returns, and scoring hands
+that tensor straight to ``reader.read``. Accepting the decoder's own shape
+here -- at the one place that already owns this conversion -- avoids a
+transpose bolted onto every call site.
 
 The two unbatched layouts are told apart by which axis is 3, not by position:
 ``shape[-1] == 3`` is channels-last, ``shape[1] == 3`` is channels-first. A

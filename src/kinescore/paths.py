@@ -1,12 +1,9 @@
 """Filesystem locations, resolved from environment variables.
 
-Deliberately unlike the repo this pattern is borrowed from: **there are no
-hardcoded fallback paths**. A prior extraction baked another user's home
-directory into its defaults, so a fresh checkout resolved to directories that
-did not exist and failed with confusing errors far from the cause.
-
-Here an unset variable raises immediately and names the variable to set. The
-only default is the current working directory, and only for outputs.
+There are no hardcoded fallback paths: an unset variable raises immediately
+and names the variable to set, rather than resolving to a directory that
+happens to exist on one machine. The only default is the current working
+directory, and only for outputs.
 """
 from __future__ import annotations
 

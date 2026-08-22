@@ -1,10 +1,9 @@
-"""kinescore -- physics-plausibility benchmark for AI-generated robot video.
+"""kinescore -- physics-plausibility judging for generated robot video.
 
-Reads a robot's joint configuration from pixels with a frozen vision backbone,
-projects it onto an exact forward-kinematics model, and measures analytic
-physics residuals. Robot-agnostic core; Franka and GR-1 plugins ship.
+A frozen vision backbone and a trained head read 3-D keypoints from frames;
+five analytic detectors score physics violations on those keypoints.
 
 The top level stays import-light: pull contracts from :mod:`kinescore.core`,
-robots from :mod:`kinescore.robots`, metrics from :mod:`kinescore.metrics`.
+robots from :mod:`kinescore.robots`, detectors from :mod:`kinescore.violations`.
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"

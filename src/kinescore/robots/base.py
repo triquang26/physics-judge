@@ -1,38 +1,16 @@
 """Shared implementation for URDF-driven robots, so a new one is mostly declaration.
 
-Every ``pytorch_kinematics``-backed ``RobotSpec`` this package ships (GR-1,
-Airbot MMK2, and now ALOHA bimanual) repeats the same handful of mechanical
-steps around the chain :mod:`kinescore.robots.urdf` builds: read per-joint
-``<limit>`` values into canonical-order arrays, scatter a *predicted* joint
-subset into the chain's full DOF vector, and derive rest-pose consecutive-
-keypoint bone geometry from one zero-ish FK call. This module factors that
-out so a new robot's ``fk.py`` writes the geometry that is actually specific
-to it (keypoint names, predicted-joint order, mount transforms) instead of
-re-deriving the same three loops.
+Every ``pytorch_kinematics``-backed :class:`~kinescore.core.robot.RobotSpec`
+repeats the same mechanical steps around the chain
+:mod:`kinescore.robots.urdf` builds: read per-joint ``<limit>`` values into
+canonical-order arrays, scatter a predicted joint subset into the chain's full
+DOF vector, and derive rest-pose consecutive-keypoint bone geometry from one
+zero-ish FK call. Those live here so a robot's ``fk.py`` writes only the
+geometry specific to it: keypoint names, predicted-joint order, mount
+transforms.
 
-What stays where
------------------
-:mod:`kinescore.robots.urdf` already owns URDF *resolution* (asset-tree vs.
-``robot_descriptions``) and hashing (:func:`~kinescore.robots.urdf.sha256_file`)
--- this module does not duplicate either. :mod:`kinescore.robots.inertia` owns
-``<inertial>`` parsing and Newton-Euler dynamics assembly (GR-1's torque
-metric only) -- unrelated to what a keypoint-only robot needs, not touched
-here either.
-
-What is deliberately NOT refactored onto this module
--------------------------------------------------------
-:class:`~kinescore.robots.franka.fk.FrankaFK` and
-:class:`~kinescore.robots.gr1.fk.GR1FK` both carry an explicit contract in
-their own module docstrings: every method body is an unchanged, diffable port
-of a specific legacy source file (``judge/fk.py`` /
-``models/kinematics/gr1_fk.py``), pinned there specifically so a future
-regression can be told apart from an intentional fix by diffing against
-``tests/golden/golden_fk.npz`` / ``golden_gr1_fk.npz``. Rewriting their
-internals to call shared helpers here -- even with identical arithmetic --
-would break that "diffs to nothing but the rename" guarantee for no
-behavioural gain. :class:`~kinescore.robots.airbot_mmk2.fk.AirbotMMK2FK`
-carries no such pin (it is original kinescore code, not a port) and *is*
-built on these helpers; see its module docstring.
+:mod:`kinescore.robots.urdf` owns URDF resolution (asset tree vs.
+``robot_descriptions``) and hashing; this module does not duplicate either.
 """
 from __future__ import annotations
 

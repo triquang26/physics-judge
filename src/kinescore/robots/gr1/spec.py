@@ -1,17 +1,15 @@
 """``RobotSpec`` for the Fourier GR-1: bimanual humanoid, two arms + feet.
 
-:class:`GR1Spec` wraps the verbatim-ported :class:`~kinescore.robots.gr1.fk.GR1FK`
-(two-chain arm kinematics) and :class:`~kinescore.robots.gr1.colliders.RobotColliders`
-(URDF-derived collision spheres + inertial CoM) and adapts them to the frozen
-``RobotSpec`` protocol (``kinescore.core.robot``). Neither wrapped class is
-modified here -- see their own module docstrings for the porting note.
+:class:`GR1Spec` wraps :class:`~kinescore.robots.gr1.fk.GR1FK` (two-chain
+arm kinematics) and :class:`~kinescore.robots.gr1.colliders.RobotColliders`
+(URDF-derived collision spheres + inertial CoM), adapting them to the
+:class:`~kinescore.core.robot.RobotSpec` protocol.
 
 Predicted state excludes the legs
 ----------------------------------
 ``GR1FK``'s 17-D ``q17`` is ``[left_arm(7), right_arm(7), waist(3)]`` --
-the pose reader this benchmark scores never predicts leg joint angles (the
-recording setup this was built for is upper-body teleop; see ``gr1_fk.py``'s
-module docstring). Every link in the URDF that is *not* reachable from those
+the pose reader this benchmark scores never predicts leg joint angles, the
+recorded teleop being upper-body only. Every link in the URDF that is *not* reachable from those
 17 joints -- both legs, the torso/base/head collider links, and the feet --
 therefore sits at its URDF rest pose in every FK call this class makes.
 :meth:`GR1Spec.support_polygon` and :meth:`GR1Spec.body_collider_spheres`
@@ -26,12 +24,10 @@ carry mass too.
 ---------------------------------------------------------------------
 The frozen ``RobotSpec`` protocol (``kinescore/core/robot.py``) has no generic
 field for collision geometry or a support polygon -- by design, since a
-Franka has neither. ``kinescore.core.metric.MetricContext.available()``
-already gates on ``"COLLIDERS" in robot.capabilities`` /
-``"SUPPORT_POLYGON" in robot.capabilities`` rather than on a specific
-attribute, so metrics that declare those requirements are expected to
-``getattr`` the extra data they need directly off the concrete ``RobotSpec``
-instance. This class is what backs that for GR-1: :attr:`colliders` (the
+Franka has neither. Consumers gate on ``"COLLIDERS" in robot.capabilities``
+/ ``"SUPPORT_POLYGON" in robot.capabilities`` rather than on a specific
+attribute, and ``getattr`` the extra data they need off the concrete
+``RobotSpec`` instance. This class is what backs that for GR-1: :attr:`colliders` (the
 wrapped :class:`RobotColliders`) plus :meth:`body_collider_spheres`,
 :meth:`world_com` and :meth:`support_polygon` (posed convenience wrappers,
 since ``RobotColliders`` itself only knows how to pose *given* link frames --
@@ -50,10 +46,8 @@ from kinescore.robots.urdf import resolve_asset_urdf, sha256_file
 
 __all__ = ["GR1Spec", "GR1_URDF_RELPATH"]
 
-#: Location of the GR-1 URDF relative to ``KINESCORE_ASSETS``. Matches the
-#: layout of the fkjepa asset tree this was ported from
-#: (``assets/grx/GRX/GR1/gr1t1/urdf/gr1t1_fourier_hand_6dof.urdf``); an
-#: operator populating ``KINESCORE_ASSETS`` should mirror that subtree.
+#: Location of the GR-1 URDF relative to ``KINESCORE_ASSETS``. An operator
+#: populating ``KINESCORE_ASSETS`` mirrors this subtree.
 GR1_URDF_RELPATH = "grx/GRX/GR1/gr1t1/urdf/gr1t1_fourier_hand_6dof.urdf"
 
 

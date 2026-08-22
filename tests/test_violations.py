@@ -29,7 +29,7 @@ import math
 import torch
 from _fake_robot import FakeRobot
 
-from kinescore.core.metric import MetricContext
+from kinescore.core.context import ClipContext
 from kinescore.violations import DETECTORS, ViolationScorer
 
 _L = (0.30, 0.25, 0.20)          # bone rest lengths (m): base-p1, p1-p2, p2-p3
@@ -79,8 +79,8 @@ def _rigid_chain(T: int, phase: float = 0.0) -> tuple[torch.Tensor, torch.Tensor
     return P, d12
 
 
-def _clip_ctx(P: torch.Tensor, robot: FakeRobot) -> MetricContext:
-    return MetricContext(dt=_DT, P=P.unsqueeze(0), robot=robot)  # (1,T,4,3)
+def _clip_ctx(P: torch.Tensor, robot: FakeRobot) -> ClipContext:
+    return ClipContext(dt=_DT, P=P.unsqueeze(0), robot=robot)  # (1,T,4,3)
 
 
 def _warp_clip(P: torch.Tensor, d12: torch.Tensor, window: tuple[int, int],
@@ -102,7 +102,7 @@ def _warp_clip(P: torch.Tensor, d12: torch.Tensor, window: tuple[int, int],
     return P
 
 
-def test_detector_names_match_prototype() -> None:
+def test_detector_names_are_the_five_error_types() -> None:
     assert [d.name for d in DETECTORS] == [
         "rigidity", "jerk", "teleport", "joint_limit", "self_collision",
     ]
@@ -118,8 +118,8 @@ def test_warped_clip_flags_rigidity_but_gt_clip_does_not() -> None:
     scorer = ViolationScorer()
     scorer.calibrate(gt_contexts, pct=95.0)
 
-    # Rigidity threshold should be at (or above) the 18mm floor documented in
-    # the prototype, since these GT clips are exactly rigid up to float error.
+    # These GT clips are exactly rigid up to float error, so the threshold
+    # lands on the 18 mm calibration floor rather than below it.
     thr = scorer.thresholds()
     assert thr["rigidity"]["threshold"] >= 18.0
 

@@ -1,15 +1,8 @@
-"""Per-frame violation scoring: one error type = one GT-calibrated ``Detector``.
+"""Physics-violation detectors and the scorer that calibrates them.
 
-Promotes a validated prototype into a package matching
-:mod:`kinescore.core.metric`'s style. See
-:mod:`kinescore.violations.detectors` for the ``Detector`` contract (and why
-each detector takes a :class:`~kinescore.core.metric.MetricContext` rather
-than a bespoke clip type), and :mod:`kinescore.violations.scorer` for
-:class:`ViolationScorer`, which calibrates every detector on GT clips and
-scores a new clip into one report per error type.
+Each detector turns one clip's predicted keypoints into a per-frame score;
+thresholds are calibrated on real motion so a clip cannot set its own bar.
 """
-from __future__ import annotations
-
 from kinescore.violations.detectors import (
     Detector,
     JerkDetector,
@@ -21,12 +14,6 @@ from kinescore.violations.detectors import (
 from kinescore.violations.scorer import DETECTORS, ViolationScorer
 
 __all__ = [
-    "Detector",
-    "RigidityDetector",
-    "JerkDetector",
-    "TeleportDetector",
-    "JointLimitDetector",
-    "SelfCollisionDetector",
-    "ViolationScorer",
-    "DETECTORS",
+    "Detector", "RigidityDetector", "JerkDetector", "TeleportDetector",
+    "JointLimitDetector", "SelfCollisionDetector", "ViolationScorer", "DETECTORS",
 ]

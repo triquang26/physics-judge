@@ -28,15 +28,14 @@ from kinescore.robots.aloha.constants import (  # noqa: E402
     KEYPOINTS_RIGHT,
 )
 
-# VERIFIED (computed from aloha_bimanual.urdf via AlohaSpec -- see this
-# module's docstring for the "rest pose" convention and
-# legacy_docs/ADDING_ALOHA_NOTES.md / KINESCORE_ASSETS/MANIFEST.json for the URDF's
-# own provenance). Per arm, the 8 consecutive-keypoint bone rest lengths:
+# Computed from aloha_bimanual.urdf via AlohaSpec -- see this module's
+# docstring for the "rest pose" convention, and KINESCORE_ASSETS/MANIFEST.json
+# for the URDF. Per arm, the 8 consecutive-keypoint bone rest lengths:
 # indices 0-4 are pure arm-structure links (shoulder->...->gripper_link);
 # indices 5-7 all have an endpoint on a gripper-actuated finger link (see
 # ACTUATED_LINKS in constants.py) and are dropped from rigid_bone_pairs, but
-# their rest lengths are pinned here too since bone_lengths (the full,
-# legacy-reproducible set) still reports them.
+# their rest lengths are pinned here too since bone_lengths (the full set)
+# still reports them.
 GOLDEN_BONE_LENGTHS_LEFT_M = [
     0.04805, 0.30585, 0.20000, 0.10000, 0.06974,  # arm structure (kept)
     0.07184, 0.04200, 0.04385,                     # gripper-actuated (dropped)
@@ -95,8 +94,8 @@ def test_left_right_symmetry_at_rest():
     """Left/right arm keypoints must mirror across x=0 at the zero pose.
 
     Cheapest possible check that the hand-assembled left/right mount
-    transforms (Menagerie ALOHA's ``aloha.xml`` mount poses, see
-    ``legacy_docs/ADDING_ALOHA_NOTES.md``) were applied correctly. Unlike Airbot
+    transforms (Menagerie ALOHA's ``aloha.xml`` mount poses) were applied
+    correctly. Unlike Airbot
     MMK2's mirror (a uniform ``[-1,1,-1]`` scale), ALOHA's right arm is
     mounted at a 180-degree yaw (not a mirror reflection) composed with the
     x-translation split, so the two GRIPPER FINGER keypoints (indices 6, 7 --

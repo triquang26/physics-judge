@@ -1,9 +1,8 @@
 """URDF joint/link names for the Airbot MMK2 arms.
 
 Only the 12 arm joints are modelled; the 24 hand dims in the real parquet are
-excluded (their claimed ``_rad`` units don't check out numerically -- unsafe
-to build a kinematic chain against). Joint order and the hand-exclusion
-evidence are verified against real data -- see ``legacy_docs/DECISIONS.md`` D-H.
+excluded: their claimed ``_rad`` units do not check out numerically, which
+makes them unsafe to build a kinematic chain against.
 """
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ RIGHT_ARM_JOINTS: tuple[str, ...] = tuple(f"right_arm_joint_{i}" for i in range(
 #: Per-arm keypoint links (shoulder -> ... -> wrist/flange), K=6. `link1`/
 #: `link2` and `link4`/`link5` coincide at rest (real zero-offset joints, not
 #: a modelling artefact) -- dropped from `rigid_bone_pairs` by the
-#: degenerate-length safety net; see `legacy_docs/DECISIONS.md` D-H.
+#: degenerate-length safety net.
 KEYPOINTS_LEFT: tuple[str, ...] = tuple(f"left_link{i}" for i in range(1, 7))
 KEYPOINTS_RIGHT: tuple[str, ...] = tuple(f"right_link{i}" for i in range(1, 7))
 

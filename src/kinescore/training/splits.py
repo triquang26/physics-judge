@@ -1,41 +1,12 @@
 """Scene-stratified train/val episode splitting.
 
-Why this exists
-----------------
-Before this module, the val set for a head-training run was **whatever the
-operator put in a ``val/`` directory** -- no ratio, no seed, no stratification
-anywhere in :mod:`kinescore.training`. That produced a real, observed defect:
-a Franka reader trained on this package's own pipeline reported ``train
-18.74 mm`` vs ``val 162.10 mm`` keypoint error, an 8.6x gap driven entirely by
-the val directory happening to hold 4 episodes that were not representative
-of (and in the worst case, near-duplicates of scenes already in) the training
-set. A val number that large a multiple of train is not "the model
-generalises poorly" -- it is "the split was never actually stratified,
-tell nothing about generalisation, and could just as easily have shown the
-opposite gap by accident."
-
-:func:`stratified_episode_split` fixes the "no ratio, no seed, no
-stratification" gap directly: given a pool of episode ids, it groups them by
-a **scene/task key** and keeps every scene entirely on one side, so a val
-episode is never a near-duplicate scene of a training episode. The existing
-directory-based split (``{cache_root}/{train,val}/*.pt``, wired through
-:func:`kinescore.training.datasets.load_split`) keeps working unchanged for
-data an operator has already laid out that way -- this module adds a second,
-programmatic option (:func:`kinescore.training.datasets.load_split_stratified`)
-for a single pool directory with no train/val split done yet, it does not
-replace the first.
-
-Why grouping happens on a *key*, not the raw episode id
-------------------------------------------------------------
-Two episodes of the same task/scene, logged back-to-back or re-run after a
-minor variation, are far more alike than two episodes of different tasks --
-splitting them onto opposite sides of train/val leaks scene-specific texture
-(lighting, background, object identity) into "generalisation," inflating a
-model's apparent val performance for exactly the reason a stratified split
-exists to prevent. See :func:`default_scene_key` for how the key is derived
-when the caller doesn't supply one, and its own docstring for what happens
-when the episode id genuinely carries no scene signal (DROID's plain integer
-ids, e.g. ``"0"``, ``"1"``, ``"100"`` -- see ``docs/DATA_PREP.md``).
+:func:`stratified_episode_split` groups a pool of episode ids by a scene/task
+key and keeps every scene entirely on one side of the split. Two episodes of
+the same scene are far more alike than two episodes of different tasks, so
+splitting them across train and val leaks scene-specific texture (lighting,
+background, object identity) into what is supposed to measure
+generalisation. See :func:`default_scene_key` for how the key is derived when
+the caller does not supply one.
 """
 from __future__ import annotations
 
@@ -97,8 +68,7 @@ def stratified_episode_split(
         Target val fraction of the total EPISODE count, in ``(0, 1)``. Exact
         only when scene sizes divide evenly; otherwise the achieved ratio is
         whatever whole-scene assignment gets closest without exceeding the
-        target (see algorithm below) -- checked, not merely hoped for, by
-        this function's own test suite.
+        target (see algorithm below).
     seed:
         Shuffles the scene order before greedily assigning scenes to val, so
         two different seeds can produce two different (still
@@ -117,15 +87,11 @@ def stratified_episode_split(
     first, stopping just before the next addition would push the running
     count over ``round(len(episode_ids) * val_ratio)``. Smallest-first is what
     keeps the achieved ratio close to the target when scene sizes are small
-    relative to the target; when even the single smallest scene exceeds the
-    target (a coarse-grained pool relative to a small ratio -- exactly the
-    historical 4-episode-val case this module exists to replace), that one
-    scene is still added (an empty val set would be a worse failure than an
-    over-sized one) and the achieved ratio simply runs high, honestly, rather
-    than silently reporting the *requested* ratio as if it were achieved. This
-    is a first-fit-ascending greedy bin-packing, not an optimal partition --
-    O(n log n), no external dependency, which matters more here than
-    exactness: this runs once per training invocation, not in a hot loop.
+    relative to it. When even the single smallest scene exceeds the target,
+    that scene is still added -- an empty val set is a worse failure than an
+    over-sized one -- and the achieved ratio runs high rather than reporting
+    the requested ratio as if it had been achieved. First-fit-ascending
+    greedy bin-packing, O(n log n), not an optimal partition.
 
     Returns
     -------

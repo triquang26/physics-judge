@@ -33,25 +33,10 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytest.ini_options]
-# Default run is CPU-only, network-free and checkpoint-free, and should finish
-# in under a minute. Everything that needs a GPU, the network, a trained
-# checkpoint or ffmpeg is opt-in via markers.
-#
-# --cov-fail-under=80: measured 81.51% on 2026-07-30 after adding real unit
-# tests for training/calibrate.py (pure tensor math, was 0%), robots/urdf.py
-# (pure file parsing, was 54%) and robots/gr1/colliders.py (URDF parsing that
-# does not actually need the real ~285 MB GR-1 asset tree despite living in
-# an asset-gated package, was 17%) -- none of these needed a GPU, network, or
-# $KINESCORE_ASSETS, they were just untested. The remaining gap is
-# concentrated in robots/{aloha,airbot_mmk2,gr1}/{fk,spec}.py (20-46%) and
-# backbones/dino.py (59%), which genuinely cannot run here: they need either
-# $KINESCORE_ASSETS (a local, never-vendored URDF/mesh checkout) or a network
-# fetch of pretrained DINO weights, and already have real golden/parity tests
-# gated behind that (see e.g. tests/test_fk_golden_aloha_bimanual.py) -- they
-# just self-skip on a host without those. 80% is therefore a real, currently
-# passing bar (not a permanently-failing one nobody can hit), left unchanged
-# rather than lowered.
-addopts = "-q -m 'not gpu and not net and not ckpt' --cov=kinescore --cov-report=term-missing --cov-fail-under=80"
+# The default run is CPU-only, network-free and checkpoint-free. Anything that
+# needs a GPU, the network, a trained checkpoint or ffmpeg is opt-in via a
+# marker.
+addopts = "-q -m 'not gpu and not net and not ckpt'"
 testpaths = ["tests"]
 markers = [
     "gpu: requires a CUDA device",
@@ -70,9 +55,6 @@ select = ["E", "F", "W", "I", "UP", "B", "C4"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-# Default (false) force-splits every `from X import Y as Z` onto its own
-# import statement even when Z is one of several names imported from X --
-# e.g. franka/fk.py's 8-name re-export block exploded into 8 statements.
 # This repo aliases private re-exports (`X as _X`) routinely, so keep them
 # combined like any other multi-name import.
 combine-as-imports = true

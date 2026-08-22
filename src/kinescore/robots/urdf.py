@@ -5,11 +5,10 @@ Two robots, two resolution strategies
 Franka ships inside the ``robot_descriptions`` package (a pinned pip
 dependency; its Panda URDF + meshes are a few MB and get cached under
 ``~/.cache/robot_descriptions`` on first use), so nothing about it needs
-``KINESCORE_ASSETS``. GR-1 does not: the fkjepa asset tree that carries its
-URDF is ~285 MB (meshes for a 44-DoF humanoid, several body variants), so
-either vendoring it into this repo or piggy-backing it onto
-``robot_descriptions`` would blow up clone size for the common case of a
-Franka-only run. It is instead resolved from ``KINESCORE_ASSETS``, an
+``KINESCORE_ASSETS``. GR-1 does not: the asset tree carrying its URDF is
+~285 MB (meshes for a 44-DoF humanoid, several body variants), so vendoring
+it into this repo would blow up clone size for every run that never touches
+it. It is instead resolved from ``KINESCORE_ASSETS``, an
 operator-owned directory that is never committed
 (:func:`kinescore.paths.env_path`); construction fails loudly with
 :class:`~kinescore.paths.MissingPathError` when the variable is unset or the
@@ -52,8 +51,8 @@ class JointLimits:
     """Per-joint limits parsed from a URDF ``<joint><limit .../></joint>``.
 
     ``velocity`` / ``effort`` are ``None`` when the URDF omits them -- URDF
-    only requires ``lower``/``upper`` on revolute/prismatic joints, the rest
-    is optional, and a fabricated cap would misrepresent the source file.
+    only requires ``lower``/``upper`` on revolute/prismatic joints, and a
+    fabricated cap would misrepresent the file.
     """
 
     lower: float
@@ -116,9 +115,7 @@ def resolve_robot_description_urdf(module_attr: str) -> Path:
         its own lazily-importable submodule rather than a plain package
         attribute -- ``getattr(robot_descriptions, module_attr)`` raises
         ``AttributeError`` even after the package itself is imported, so this
-        goes through :func:`importlib.import_module` instead (verified
-        against the installed ``robot_descriptions`` package; see
-        ``legacy_docs/PROVENANCE.md``).
+        goes through :func:`importlib.import_module` instead.
 
     Imported lazily: importing this function must not require the
     ``robot_descriptions`` package to be installed, so that

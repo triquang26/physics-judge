@@ -1,12 +1,7 @@
-"""``kinescore`` command-line interface: argparse subparsers, one per file.
+"""The command line: one module per subcommand, discovered by filename.
 
-Design rule this whole package follows (see ``kinescore.cli.main``): every
-``cmd_*.py`` module's top level imports only the standard library plus other
-``kinescore.cli`` helpers -- never ``torch``, ``pandas``, ``transformers`` or
-anything in :mod:`kinescore.core`/``.robots``/``.readers``. Those go inside
-each subcommand's ``run(args)`` function. That is what makes ``kinescore
---help`` and ``kinescore doctor`` instant and importable on an interpreter
-that has none of the heavy optional dependencies installed -- the CLI package
-itself never pays for a dependency a given invocation doesn't use.
+A ``cmd_*.py`` module declares ``NAME``, ``HELP``, ``add_arguments(parser)``
+and ``run(args) -> int``. ``add_arguments`` runs on every invocation including
+``--help``, so it stays import-light; every heavy import happens inside
+``run``, after argparse has accepted the command line.
 """
-from __future__ import annotations

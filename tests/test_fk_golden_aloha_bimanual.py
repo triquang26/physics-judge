@@ -1,24 +1,12 @@
 """ALOHA bimanual FK regression freeze against ``golden_fk_aloha_bimanual.npz``.
 
-Unlike ``golden_fk.npz`` / ``golden_gr1_fk.npz`` (frozen from an independent
-LEGACY source repo via ``tools/gen_golden.py``, so a porting bug shows up as a
-numeric mismatch against code that never touched ``src/kinescore``), ALOHA
-has no such legacy source: it is new code written directly against
-``kinescore.core.robot.RobotSpec``, not a port. This fixture is therefore
-**self-produced** -- generated once from :class:`AlohaSpec` itself (seed 0,
-the same random-in-limits-batch + handwritten-poses pattern
-``tools/gen_golden.py::golden_fk`` uses for the Panda) and frozen so a FUTURE
-refactor of ``AlohaFK``/``AlohaSpec`` is checked against today's numbers, the
-same regression-catching role a legacy-diffed fixture plays for Franka/GR-1,
-just without an independent "ground truth" to diff against on day one.
+The fixture was generated from :class:`AlohaSpec` itself (seed 0, random
+in-limits batch plus handwritten poses) and frozen, so a later change to
+``AlohaFK``/``AlohaSpec`` geometry shows up as a numeric mismatch instead of
+passing silently.
 
-Regenerate (only if the URDF or the FK arithmetic changes intentionally) with
-the snippet in this file's own module docstring history / commit message --
-there is no ``tools/gen_golden.py`` generator for this fixture (that tool is
-scoped to legacy-source diffing, which does not apply here).
-
-Requires ``pytorch_kinematics`` + a resolvable ALOHA URDF; skipped entirely
-when either is unavailable, or when the golden file itself is missing.
+Requires ``pytorch_kinematics`` and a resolvable ALOHA URDF; skipped when
+either is unavailable, or when the golden file is missing.
 """
 from pathlib import Path
 

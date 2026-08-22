@@ -1,0 +1,39 @@
+# view_id -> panel geometry. The only definition of a packing in this repo.
+#
+# panel is the measured size of ONE panel, in pixels. Measure before adding an
+# entry: column-difference seams locate panel boundaries, and per-quadrant
+# variance across clips settles whether a quadrant is systematically blank.
+
+views:
+  sv1:
+    n_views: 1
+    packing: none
+
+  mv3_row:
+    n_views: 3
+    packing: width
+    n_panels: 3
+    panel: [320, 192]
+    order: [exterior_1, exterior_2, wrist]
+
+  mv4_row:
+    n_views: 4
+    packing: width
+    n_panels: 4
+    panel: [320, 192]
+    order: [exterior_1, exterior_2, wrist_left, wrist_right]
+
+  mv4_grid:
+    n_views: 4
+    packing: grid2x2
+    n_panels: 4
+    panel: [384, 216]
+    order: [exterior_1, exterior_2, wrist_left, wrist_right]
+
+  mv4_grid_br_blank:
+    n_views: 3
+    packing: grid2x2
+    n_panels: 4
+    panels: [0, 1, 2]
+    panel: [384, 216]
+    order: [exterior_1, exterior_2, wrist]

@@ -1,26 +1,14 @@
-"""A minimal, hand-built ``RobotSpec`` for metric-layer tests that don't need FK.
+"""A minimal, hand-built ``RobotSpec`` for tests that do not need real FK.
 
-Not a test module itself (no ``test_*`` prefix, so pytest never collects it),
-just shared support for the metric tests this agent owns
-(``test_metric_registry_conformance.py``, ``test_rigidity*.py``,
-``test_analytic_physics.py``, ``test_limit_semantics.py``).
+Not a test module (no ``test_`` prefix, so pytest never collects it), just
+shared support.
 
-Why this exists alongside ``kinescore.robots.synthetic.Synthetic2R``
------------------------------------------------------------------------
-``Synthetic2R`` is the right fixture for anything that needs real FK (its
-``forward_kinematics`` is exercised by ``kinescore.robots`` tests directly).
-But it deliberately has **no degenerate bone** ("unlike the Franka gripper",
-per its own docstring) and **no joint-limit-violation-relevant q_raw
-scenario builder** -- it is a geometry fixture, not a scenario fixture. A lot
-of what this agent needs to test (bone-set contamination, joint-limit
-gating, vel/effort-limit gating) is about feeding a metric a *hand-picked*
-``P`` / ``q`` / ``q_raw`` array and a *hand-picked* robot geometry chosen to
-land exactly on a boundary condition -- which calls for a robot object with
-no FK at all, just the tensors :class:`kinescore.core.robot.RobotSpec`
-declares. :class:`FakeRobot` is exactly that: every field a metric might
-read, all overridable, structurally satisfying the ``RobotSpec`` Protocol
-(``isinstance(FakeRobot(), RobotSpec)`` is ``True`` since it is
-``@runtime_checkable`` and only checks attribute presence).
+:class:`~kinescore.robots.synthetic.Synthetic2R` is the fixture for anything
+that needs real forward kinematics, but it is a geometry fixture: no
+degenerate bone, no hand-picked limit scenario. Detector tests mostly want to
+feed a hand-picked ``P``/``q`` and a hand-picked geometry chosen to land on a
+boundary condition, which calls for a robot with no FK at all -- just the
+tensors :class:`kinescore.core.robot.RobotSpec` declares.
 """
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from kinescore.core.metric import MetricContext
+from kinescore.core.context import ClipContext
 from kinescore.violations.detectors import (
     Detector,
     JerkDetector,
@@ -24,12 +24,11 @@ from kinescore.violations.detectors import (
 __all__ = ["DETECTORS", "ViolationScorer"]
 
 #: Per-detector calibration floor (same units as the detector), keyed by
-#: ``Detector.name``. Observed on the validated prototype: a near-zero GT
-#: spread on rigidity/joint_limit would otherwise calibrate a threshold so
-#: tight it flags real, violation-free motion. ``self_collision`` is
-#: ``higher_is_worse=False`` (lower distance = worse); a floor there would
-#: loosen exactly the bound calibration is meant to tighten, so it has none
-#: -- see ``Detector.calibrate``.
+#: ``Detector.name``. A near-zero GT spread on rigidity/joint_limit otherwise
+#: calibrates a threshold so tight it flags real, violation-free motion.
+#: ``self_collision`` is ``higher_is_worse=False`` (lower distance = worse), so
+#: a floor there would loosen exactly the bound calibration tightens -- it has
+#: none. See ``Detector.calibrate``.
 _CALIBRATION_FLOOR = {"rigidity": 18.0, "joint_limit": 3.0}
 
 
@@ -69,7 +68,7 @@ class ViolationScorer:
     def __init__(self, detectors: Sequence[Detector] | None = None) -> None:
         self.detectors = list(detectors) if detectors is not None else _default_detectors()
 
-    def calibrate(self, gt_contexts: Sequence[MetricContext], pct: float = 95.0) -> None:
+    def calibrate(self, gt_contexts: Sequence[ClipContext], pct: float = 95.0) -> None:
         """Fit + threshold every detector against pooled GT per-frame scores.
 
         Calls ``det.fit(gt_contexts)`` first (a no-op for detectors that
@@ -91,6 +90,6 @@ class ViolationScorer:
             for d in self.detectors
         }
 
-    def score(self, ctx: MetricContext) -> dict:
+    def score(self, ctx: ClipContext) -> dict:
         """Score one clip: ``{detector_name: report}``, each with its own intervals."""
         return {det.name: det.report(ctx) for det in self.detectors}

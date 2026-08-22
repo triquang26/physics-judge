@@ -1,0 +1,15 @@
+# Which cells this run scores. A selection, never a definition -- every cell
+# named here must exist in cells.yaml.
+
+source:
+  adapter: video_gen_physics
+  root: ${KINESCORE_DATA_ROOT}/video_gen_physics
+  catalog: data_for_web/catalog.json
+
+methods: [dense, augment, worldcache]
+splits: [makovian, non_makovian]
+
+cells:
+  - bimanual.mv4_row.ctrlworld_4view_grid
+  - humanoid.mv4_row.ctrlworld_4view_grid
+  - single_arm.mv3_row.ctrlworld

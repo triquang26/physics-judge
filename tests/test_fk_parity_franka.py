@@ -1,21 +1,11 @@
-"""Franka FK parity against a golden checkpoint.
+"""Franka FK parity against ``tests/golden/golden_fk.npz``.
 
-Compares :meth:`FrankaSpec.forward_kinematics` against
-``tests/golden/golden_fk.npz``. That fixture is generated independently of
-this file (by whichever agent owns ``legacy_docs/PROVENANCE.md`` / the golden-data
-pipeline), specifically so a regression introduced while porting
-:class:`~kinescore.robots.franka.fk.FrankaFK` shows up as a numeric mismatch
-against an independently-produced reference, rather than being invisible
-because the same code path produced both sides of the comparison.
+Fixture layout: ``q`` -- arm angles ``(N,7)`` or ``(B,T,7)``; ``gripper``
+(optional) -- opening in ``[0,1]``; ``P`` -- reference keypoint positions with
+the same leading shape as ``q`` and a trailing ``(K,3)``, ``K=8``, in metres.
 
-Expected ``.npz`` layout (documented here since this file is the first
-consumer): ``q`` -- arm angles, shape ``(N,7)`` or ``(B,T,7)``; ``gripper``
-(optional) -- opening in ``[0,1]``, shape ``(N,)``/``(N,1)`` or ``(B,T,1)``;
-``P`` -- reference keypoint positions, same leading shape as ``q`` with a
-trailing ``(K,3)`` (``K=8``), in metres.
-
-Skipped entirely -- not failed -- when the golden file does not exist yet, or
-when ``pytorch_kinematics`` / the Panda URDF are unavailable.
+Skipped -- not failed -- when the golden file, ``pytorch_kinematics`` or the
+Panda URDF are unavailable.
 """
 from pathlib import Path
 

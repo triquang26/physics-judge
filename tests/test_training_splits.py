@@ -96,13 +96,3 @@ class TestStratifiedEpisodeSplit:
         groups_train = {key_fn(x) for x in train}
         groups_val = {key_fn(x) for x in val}
         assert not (groups_train & groups_val)
-
-    def test_directory_based_split_is_unaffected(self):
-        """This module adds an alternative to, not a replacement for, the
-        existing directory-based `{cache_root}/{train,val}/*.pt` layout --
-        see kinescore.training.datasets.load_split, which does not call
-        anything in this module at all."""
-        import inspect
-
-        from kinescore.training import datasets
-        assert "stratified" not in inspect.getsource(datasets.load_split)

@@ -1,17 +1,9 @@
 """Decode frames for a :class:`~kinescore.core.clip.ClipSpec` -- and only that.
 
-The source's ``load_rgb(path: str, max_frames: int = 0)`` took a bare path.
-Decimation (skip every other frame, take a stride-2 subset) happened at other
-call sites as a plain slice on the decoded tensor, entirely decoupled from
-whatever ``dt`` was passed to scoring alongside it -- that decoupling is
-defect D1 (see ``kinescore.core.clip``): half of a benchmark's clips were
-scored at a ``dt`` that no longer matched the frames actually fed to the
-metrics.
-
-Here :func:`load_rgb` takes the :class:`~kinescore.core.clip.ClipSpec` itself.
-The *only* frame-dropping this function performs is ``clip.stride``, a field
-that only :meth:`ClipSpec.subsample` can set (and which scales ``dt`` for you
-when it does). There is no separate stride parameter to pass inconsistently.
+:func:`load_rgb` takes the spec, not a path. The only frame-dropping it
+performs is ``clip.stride``, a field only :meth:`ClipSpec.subsample` can set
+(and which scales ``dt`` when it does), so there is no separate stride
+parameter to pass inconsistently.
 """
 from __future__ import annotations
 
@@ -56,12 +48,8 @@ def load_rgb(clip: ClipSpec, max_frames: int = 0) -> torch.Tensor:
         drops frames.
     max_frames:
         Optional hard cap, applied *after* striding, by keeping the first
-        ``max_frames`` frames. This is a plain head-truncation -- not the
-        source's ``np.linspace`` uniform resampling across the whole clip.
-        Uniform resampling silently changes the spacing between kept frames
-        (and therefore the effective ``dt``) without updating any metadata,
-        which is exactly the class of bug this module exists to prevent; a
-        truncation changes only *how much* of the clip is scored, not the
+        ``max_frames`` frames. A head truncation, deliberately not a uniform
+        resample: it changes only *how much* of the clip is scored, never the
         interval between the frames that are.
 
     Returns
@@ -74,11 +62,10 @@ def load_rgb(clip: ClipSpec, max_frames: int = 0) -> torch.Tensor:
     ------
     ValueError
         If the decoded frame count doesn't match what ``clip`` declares --
-        i.e. the file on disk no longer matches the spec that says how to
+        i.e. the file on disk does not match the spec that says how to
         interpret it (wrong file swapped in, spec built from a stale probe,
-        stride applied twice, ...). Silently proceeding would let the
-        timebase drift out from under the frames exactly like defect D1;
-        refusing is the point of taking a ``ClipSpec`` instead of a path.
+        stride applied twice). Refusing is the point of taking a ``ClipSpec``
+        instead of a path.
     """
     frames = _decode_all(clip.path)
     if clip.stride > 1:
@@ -93,8 +80,8 @@ def load_rgb(clip: ClipSpec, max_frames: int = 0) -> torch.Tensor:
             f"decoded {frames.shape[0]} frames from {clip.path!r} (stride="
             f"{clip.stride}) but the ClipSpec declares n_frames={clip.n_frames}"
             f"{f', max_frames={max_frames}' if max_frames else ''} "
-            f"(expected {expected}). The timebase no longer matches the frames "
-            f"actually being scored -- refusing to silently proceed (defect D1).")
+            f"(expected {expected}). The timebase does not match the frames "
+            f"being scored -- refusing to silently proceed.")
 
     rgb = torch.tensor(np.asarray(frames)).permute(0, 3, 1, 2).float() / 255.0
     return rgb

@@ -1,21 +1,10 @@
 """Clip identity and the timebase.
 
-``ClipSpec`` is the **sole owner of ``dt``** in kinescore. Nothing else stores a
-frame interval, and no metric carries a default one.
-
-Why this is a whole module instead of a float argument
-------------------------------------------------------
-In the source benchmarks ``dt`` defaulted to ``0.2`` in three places and was
-simply never passed at two call sites, while the training loader decimated
-frames with a random stride of 1 or 2. Half the clips were therefore scored at a
-``dt`` that was wrong by 2x, which inflates speed 2x, acceleration 4x and jerk
-**8x** (measured; see ``legacy_docs/PROVENANCE.md`` D1). Ratio metrics partly hide it,
-absolute ones do not.
-
-The structural fix is that ``dt`` never travels as a bare float. It is a field of
-this frozen dataclass, and :meth:`ClipSpec.subsample` is the *only* supported way
-to decimate frames -- it scales ``dt`` for you. A loader cannot drop every other
-frame without going through a code path that fixes up the timebase.
+:class:`ClipSpec` is the sole owner of ``dt``: nothing else stores a frame
+interval and no detector carries a default one. ``dt`` never travels as a bare
+float, and :meth:`ClipSpec.subsample` is the only supported way to decimate
+frames -- it scales ``dt`` with the stride, so a loader cannot drop frames
+without fixing up the timebase.
 """
 from __future__ import annotations
 
@@ -25,21 +14,16 @@ from typing import Literal
 
 __all__ = ["ViewLayout", "ClipSpec", "DtSource", "TimebaseError", "PackingMode"]
 
-DtSource = Literal[
-    "ffprobe", "fps_arg", "dt_arg", "table", "synthetic", "resampled"
-]
+DtSource = Literal["ffprobe", "fps_arg", "dt_arg", "table", "synthetic"]
 
-#: How the physical camera panels are arranged inside one packed frame. See
-#: ``legacy_docs/DECISIONS.md`` D-G for the corpus survey (which generator uses
-#: which mode) and the measured evidence behind the geometry guard below.
-PackingMode = Literal["height", "width", "grid2x2"]
-_PACKINGS: tuple[PackingMode, ...] = ("height", "width", "grid2x2")
+#: How the physical camera panels are arranged inside one packed frame.
+PackingMode = Literal["none", "height", "width", "grid2x2"]
+_PACKINGS: tuple[PackingMode, ...] = ("none", "height", "width", "grid2x2")
 
 #: A packed panel this far outside a plausible single-camera aspect ratio is
-#: almost certainly the wrong packing axis, not a real crop -- see
-#: ``legacy_docs/DECISIONS.md`` D-G. Example: a 960x192 width-stacked frame sliced
-#: as 3 HEIGHT bands would be 960x64 (aspect 15.0); its real panels are
-#: 320x192 width-slices (aspect 1.67).
+#: almost certainly the wrong packing axis, not a real crop. A 960x192
+#: width-stacked frame sliced as 3 height bands would be 960x64 (aspect 15.0);
+#: its real panels are 320x192 width slices (aspect 1.67).
 _MIN_PANEL_ASPECT = 0.2
 _MAX_PANEL_ASPECT = 5.0
 
@@ -52,11 +36,10 @@ class TimebaseError(ValueError):
 class ViewLayout:
     """How multiple camera views are packed into one frame / token sequence.
 
-    kinescore treats multiview as a first-class property rather than an
-    ``if n_cams > 1`` branch. A single-view clip is ``ViewLayout(n_views=1)``,
-    which is the same code path as three views, not a special case.
+    A single-view clip is ``ViewLayout(n_views=1)`` -- the same code path as
+    three views, not a special case.
 
-    Two packings coexist in the sources and must stay consistent:
+    Two packings coexist and must stay consistent:
 
     * **pixel space** -- ``n_panels`` camera panels arranged per ``packing``
       (stacked on height or width, or a 2x2 grid); see :meth:`view_crops`.
@@ -65,10 +48,7 @@ class ViewLayout:
 
     ``n_views`` is the number of views this layout *exposes* to a caller,
     which need not equal ``n_panels`` (the number of physical panels in the
-    packed frame) -- see ``panels`` below for selecting a subset. See
-    ``legacy_docs/DECISIONS.md`` D-G for why this exists (a width-stacked 960x192
-    clip was silently mis-sliced into three meaningless horizontal bands
-    under the old height-only assumption) and the corpus survey of packings.
+    packed frame) -- see ``panels`` below for selecting a subset.
 
     Parameters
     ----------
@@ -82,10 +62,7 @@ class ViewLayout:
         Patch tokens contributed by one view after backbone pooling, when known.
         ``None`` for pixel-space-only layouts.
     packing:
-        Physical arrangement of panels in the packed frame. Defaults to
-        ``"height"`` -- unchanged from before this field existed, so every
-        pre-existing ``ViewLayout(n_views=...)`` call site keeps its old
-        :attr:`key` and behaviour exactly.
+        Physical arrangement of panels in the packed frame.
     n_panels:
         Physical panel count in the packed frame, if different from
         ``n_views`` (a subset selection -- see ``panels``). ``None`` (the
@@ -117,6 +94,10 @@ class ViewLayout:
         if self.n_panels is not None and self.n_panels < 1:
             raise ValueError(f"n_panels must be >= 1, got {self.n_panels}")
         panel_count = self.panel_count
+        if self.packing == "none" and panel_count != 1:
+            raise ValueError(
+                f"packing='none' means the frame is one whole panel, so it "
+                f"has exactly 1 panel, got n_panels={panel_count}")
         if self.packing == "grid2x2" and panel_count != 4:
             raise ValueError(
                 f"grid2x2 packing always has exactly 4 physical panels, "
@@ -159,12 +140,8 @@ class ViewLayout:
     def key(self) -> str:
         """Stable identity string, stored in checkpoints and cache headers.
 
-        Unchanged from before ``packing``/``n_panels``/``panels`` existed for
-        every layout that doesn't use them (``packing="height"``, no
-        ``n_panels``, no ``panels``) -- verified against the real manifests
-        under ``kinescore_runtime/out/`` (``1x?:unnamed``,
-        ``3x?:exterior_1+exterior_2+wrist``), see ``legacy_docs/DECISIONS.md`` D-G.
-        Any other packing or an explicit panel subset appends enough to
+        A plain height stack keys as ``{n_views}x{tokens_per_view}:{names}``;
+        any other packing or an explicit panel subset appends enough to
         disambiguate, since those describe genuinely different geometry.
         """
         names = "+".join(self.order) if self.order else "unnamed"
@@ -175,43 +152,19 @@ class ViewLayout:
         idx = ",".join(str(p) for p in self.panel_indices)
         return f"{base}:{self.packing}:{self.panel_count}p:{idx}"
 
-    def view_height(self, frame_height: int) -> int:
-        """Per-view pixel height for a plain height-stacked layout (no subset).
-
-        Kept for backward compatibility with the pre-``packing`` API; new code
-        should use :meth:`view_crops`, which handles every packing and subset.
-
-        Raises
-        ------
-        ValueError
-            If this layout isn't a plain height stack, or ``frame_height`` is
-            not divisible by ``n_views`` (the clip isn't the stack claimed).
-        """
-        if self.packing != "height" or self.is_subset:
-            raise ValueError(
-                f"view_height() only supports a plain height stack (no "
-                f"subset); this layout is packing={self.packing!r} "
-                f"is_subset={self.is_subset} (key={self.key!r}). Use "
-                f"view_crops(frame_width, frame_height) instead.")
-        if frame_height % self.n_views:
-            raise ValueError(
-                f"frame height {frame_height} is not divisible by n_views="
-                f"{self.n_views}; the clip is not a {self.n_views}-view stack")
-        return frame_height // self.n_views
-
     def _panel_size(self, frame_width: int, frame_height: int) -> tuple[int, int]:
         """Validate ``packing`` against the probed frame, return ``(h, w)`` per panel.
 
         Refuses rather than guesses: raises on a divisibility mismatch (the
         clip isn't the stack/grid this layout claims) *and* on an implausible
-        resulting panel aspect ratio when there's more than one panel -- the
-        check that would have caught a width-stacked 960x192 ctrlworld clip
-        silently mis-sliced into three 960x64 horizontal bands under a
-        height-stack assumption (192 % 3 == 0, so plain divisibility alone
-        would not have raised). See ``legacy_docs/DECISIONS.md`` D-G.
+        panel aspect ratio when there is more than one panel. Divisibility
+        alone is not enough -- a 960x192 width-stacked frame divides evenly
+        into three height bands too, and those bands are meaningless.
         """
         n = self.panel_count
-        if self.packing == "height":
+        if self.packing == "none":
+            ph, pw = frame_height, frame_width
+        elif self.packing == "height":
             if frame_height % n:
                 raise ValueError(
                     f"frame height {frame_height} is not divisible by "
@@ -240,7 +193,7 @@ class ViewLayout:
                     f"[{_MIN_PANEL_ASPECT}, {_MAX_PANEL_ASPECT}]. This is "
                     f"very likely the wrong packing axis declared for this "
                     f"frame, not a real camera crop -- refusing to slice it "
-                    f"rather than guess. See legacy_docs/DECISIONS.md D-G.")
+                    f"rather than guess.")
         return ph, pw
 
     def panel_box(self, panel_index: int, frame_width: int, frame_height: int
@@ -268,23 +221,20 @@ class ViewLayout:
                    ) -> list[tuple[int, int, int, int]]:
         """Pixel boxes ``(top, bottom, left, right)``, one per exposed view, in order.
 
-        This is the single place crop geometry is computed -- callers (the
-        DINO backbone, a manual inspection script) never re-derive it, and a
-        subset selection (e.g. ctrlworld dropping its wrist panel) is applied
-        here rather than by caller-side slicing. Raises via
-        :meth:`_panel_size` if ``packing`` is inconsistent with the probed
-        frame instead of silently dividing.
+        The single place crop geometry is computed: callers never re-derive
+        it, and a panel subset is applied here rather than by caller-side
+        slicing. Raises via :meth:`_panel_size` if ``packing`` is inconsistent
+        with the probed frame instead of silently dividing.
         """
         return [self.panel_box(p, frame_width, frame_height) for p in self.panel_indices]
 
     def assert_tokens(self, n_tokens: int) -> None:
         """Assert a token count matches this layout exactly.
 
-        This is the check the source lacked. It catches both directions: a
-        3-view feature fed to a 1-view head *and* a 1-view feature fed to a
-        3-view head, instead of only the divisibility case. Token-space
-        arithmetic only ever depends on ``n_views``/``tokens_per_view``, so
-        this works identically regardless of ``packing``.
+        Catches both directions: a 3-view feature fed to a 1-view head and a
+        1-view feature fed to a 3-view head. Token-space arithmetic depends
+        only on ``n_views``/``tokens_per_view``, so this is independent of
+        ``packing``.
         """
         if self.tokens_per_view is None:
             if n_tokens % self.n_views:
@@ -301,11 +251,7 @@ class ViewLayout:
                 f"(layout key {self.key!r}).")
 
 
-#: ``ViewLayout`` is a frozen dataclass, so one shared instance is a safe
-#: default -- linters flag a bare ``ViewLayout()`` call in a signature on
-#: principle (most default-arg calls build a *mutable* object shared across
-#: calls), but a module-level singleton is clearer than silencing the rule
-#: inline. Same pattern as ``video/probe.py``'s ``_SINGLE_VIEW``.
+#: ``ViewLayout`` is frozen, so one shared instance is a safe default.
 _DEFAULT_VIEW_LAYOUT = ViewLayout()
 
 
@@ -377,9 +323,9 @@ class ClipSpec:
     def subsample(self, k: int) -> ClipSpec:
         """Return the spec for every ``k``-th frame, with ``dt`` scaled by ``k``.
 
-        **This is the only supported way to decimate a clip.** Frame-dropping
-        anywhere else -- a slice in a loader, a stride in a dataset -- reproduces
-        defect D1, because the timebase silently stops matching the frames.
+        The only supported way to decimate a clip. Frame-dropping anywhere
+        else -- a slice in a loader, a stride in a dataset -- leaves the
+        timebase describing frames that are no longer being scored.
         """
         if k < 1:
             raise ValueError(f"subsample factor must be >= 1, got {k}")

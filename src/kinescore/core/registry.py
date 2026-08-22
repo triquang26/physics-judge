@@ -1,12 +1,5 @@
-"""One generic registry, reused by every extension axis (robots, metrics,
-suites, and now benchmark sources / data layouts via :mod:`kinescore.core.contracts`).
-
-Before this module each axis grew its own hand-rolled ``dict[str, Callable]``
-plus a ``get_x``/``available_x`` pair -- see ``kinescore.robots._FACTORIES``,
-which is the model this generalises rather than replaces (it stays
-untouched: robots' lazy-import discipline is exactly what :class:`Registry`
-preserves below, and there is no benefit to a mechanical rewrite of code that
-already gets this right).
+"""One generic registry, reused by every extension axis: robots, dataset
+adapters.
 
 The one property every caller depends on: **factories are lazy**. A registry
 stores ``name -> zero-arg factory``, never a constructed instance and never
@@ -62,9 +55,8 @@ class Registry(Generic[T]):
         ----------
         **kwargs:
             Forwarded to the factory (e.g. ``device``/``dtype``/``urdf_path``
-            overrides some factories accept). Factories that take no
-            arguments simply ignore an empty ``kwargs``, so this is
-            backward-compatible with every existing zero-arg registration.
+            overrides some factories accept). A factory that takes no
+            arguments simply ignores an empty ``kwargs``.
 
         Raises
         ------

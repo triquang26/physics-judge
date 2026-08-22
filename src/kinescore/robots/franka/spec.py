@@ -1,39 +1,25 @@
 """``RobotSpec`` for the Franka Panda: 7-DOF arm + 2-finger gripper on a table.
 
-:class:`FrankaSpec` wraps the verbatim-ported :class:`~kinescore.robots.franka.fk.FrankaFK`
-and adapts it to the frozen ``RobotSpec`` protocol (``kinescore.core.robot``).
-It does not modify ``FrankaFK`` -- that module is a byte-for-byte port and stays
-that way so it keeps producing the exact numbers the source benchmark did (see
-its module docstring). Everything below is new code that sits *around* it.
-
-Three design decisions this file makes, each fixing a defect the source had:
+:class:`FrankaSpec` adapts :class:`~kinescore.robots.franka.fk.FrankaFK` to
+the :class:`~kinescore.core.robot.RobotSpec` protocol. Three decisions it
+makes:
 
 1. **Degenerate/actuation-only bones are dropped from ``rigid_bone_pairs``.**
-   See :data:`kinescore.robots.franka.constants.RIGID_BONE_MIN_M` for the full
-   reasoning -- in short, three of the seven consecutive-keypoint bones touch
-   a finger link, whose position tracks the gripper's own prismatic joint
-   rather than the rigid arm structure, so including them in a rigidity
-   residual means "the gripper opened" reads as "the arm deformed".
-2. **No ``SUPPORT_POLYGON``, no ``COLLIDERS`` capability.** A Panda is bolted to
-   a table -- it has no feet and no balance margin to report, and this file
-   ports no collision geometry. Declaring those capabilities anyway would let
-   a metric compute a *number* for them, which is worse than ``NaN``: a
-   balance metric that silently always reads "stable" for an arm that cannot
-   fall over is not measuring anything, and nothing downstream can tell the
-   difference between "measured as stable" and "structurally not
-   applicable" (the exact ``0`` vs ``NaN`` distinction ``core/robot.py``
-   documents for ``capabilities``).
-3. **The forward-kinematics hot path does not do a linear search per call.**
-   ``FrankaFK._joint_tensor`` (see ``fk.py``) calls ``names.index(name)``
-   inside every ``forward``/``forward_transforms`` invocation -- fine for a
-   handful of construction-time calls (that's all ``FrankaFK`` itself makes,
-   to compute its rest-pose bone lengths), but ``FrankaSpec.forward_kinematics``
-   is the per-clip, per-frame-batch scoring path. :meth:`FrankaSpec.__init__`
-   resolves each Panda joint's index into the ``pytorch_kinematics`` chain's
-   parameter list exactly once and stores it as a ``LongTensor`` buffer, so
-   scoring assembles the chain's input with a single vectorised
-   ``th[:, idx] = q`` scatter instead of a 7+2-iteration Python loop that
-   calls ``list.index`` (itself ``O(n_joints)``) every time.
+   See :data:`kinescore.robots.franka.constants.RIGID_BONE_MIN_M`: three of
+   the seven consecutive-keypoint bones touch a finger link, whose position
+   tracks the gripper's prismatic joint rather than rigid arm structure, so
+   including them makes "the gripper opened" read as "the arm deformed".
+2. **No ``SUPPORT_POLYGON``, no ``COLLIDERS`` capability.** A Panda is bolted
+   to a table: it has no balance margin to report, and this spec carries no
+   collision geometry. Declaring the capabilities anyway would produce a
+   number indistinguishable from a real measurement -- a balance detector
+   that always reads "stable" for a robot that cannot fall over measures
+   nothing.
+3. **Forward kinematics does no linear search per call.**
+   :meth:`FrankaSpec.__init__` resolves each Panda joint's index into the
+   ``pytorch_kinematics`` chain once and stores it as a ``LongTensor``
+   buffer, so scoring assembles the chain input with a single vectorised
+   ``th[:, idx] = q`` scatter.
 """
 from __future__ import annotations
 
@@ -69,7 +55,7 @@ class FrankaSpec:
     All ``RobotSpec`` protocol attributes (see ``kinescore.core.robot``), plus:
 
     fk:
-        The wrapped, verbatim :class:`FrankaFK` instance. Exposed for callers
+        The wrapped :class:`FrankaFK` instance. Exposed for callers
         that need the lower-level ``ee_pose`` helper (end-effector pose with
         the gripper held closed) that has no ``RobotSpec``-protocol
         equivalent; not used by :meth:`forward_kinematics` /
@@ -108,7 +94,7 @@ class FrankaSpec:
         self.vel_limits: torch.Tensor | None = self.fk.joint_vel_limits.clone()
         self.effort_limits: torch.Tensor | None = self.fk.joint_effort_limits.clone()
 
-        # ---- bones: full set (legacy-reproducible) + rigid-only subset ------
+        # ---- bones: full set + rigid-only subset ----------------------------
         self.bone_pairs = self.fk.bone_pairs.clone()
         self.bone_lengths = self.fk.bone_lengths.clone()
         mask = self._rigid_bone_mask()

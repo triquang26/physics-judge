@@ -1,23 +1,10 @@
 """Robot registry: ``get_robot(name) -> RobotSpec``.
 
-Importing this module must never require ``pytorch_kinematics`` or
-``robot_descriptions``. ``kinescore.robots.synthetic.Synthetic2R`` is imported
-eagerly (it has no such dependency and is the whole point of the CPU-only test
-path -- see its module docstring), but Franka and GR-1 are resolved lazily
-inside :func:`get_robot`, so a caller who only ever asks for
-``"synthetic_2r"`` -- the metric-layer test suite, mainly -- never triggers the
-``import pytorch_kinematics`` in ``franka/fk.py`` / ``gr1/fk.py``, which can
-otherwise fail on a machine that has not installed the (heavier, optional-in-
-spirit-even-though-listed-as-a-core-dependency) kinematics stack.
-
-Built on :class:`kinescore.core.registry.Registry` -- the same ``name ->
-lazy factory -> T`` mechanism :mod:`kinescore.bench.sources.registry` uses.
-This module used to keep its own hand-rolled ``_FACTORIES`` dict instead,
-because :meth:`~kinescore.core.registry.Registry.get` originally took no
-kwargs while robot factories need ``device=``/``dtype=``/``urdf_path=``
-overrides; a mechanical swap would have silently dropped them.
-``Registry.get`` now forwards ``**kwargs`` to the factory, so that gap is
-closed and this axis no longer needs a second mechanism.
+Importing this module never requires ``pytorch_kinematics`` or
+``robot_descriptions``. :class:`~kinescore.robots.synthetic.Synthetic2R` is
+imported eagerly -- it has no such dependency and is the CPU-only test path --
+while the URDF-backed robots are resolved lazily inside :func:`get_robot`, so
+asking for ``"synthetic_2r"`` never pulls in the kinematics stack.
 """
 from __future__ import annotations
 

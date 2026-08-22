@@ -54,9 +54,8 @@ class TestHeightStack:
 
 
 class TestCtrlworldWidthStackSubset:
-    """The regression this generalization exists for: a 960x192 clip is a
-    3-panel WIDTH stack (exterior_1 | exterior_2 | wrist), not a height
-    stack. See ``kinescore.bench.sources.ctrlworld`` and legacy_docs/DECISIONS.md D-G.
+    """A 960x192 ctrlworld clip is a 3-panel WIDTH stack
+    (exterior_1 | exterior_2 | wrist), not a height stack.
     """
 
     LAYOUT = ViewLayout(n_views=2, order=("exterior_1", "exterior_2"),

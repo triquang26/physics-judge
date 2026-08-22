@@ -1,26 +1,13 @@
 """Shared test machinery: golden-fixture loading, tolerant comparison, skips.
 
-Why comparison needs its own helper
-------------------------------------
-``numpy.testing.assert_allclose`` on a dict of ~150 keys (a full
-``PhysicsConsistency.report()`` flattened, say) fails on the FIRST mismatch it
-finds, in whatever order ``dict`` iteration happens to give you -- usually not
-the most informative one. A port bug that is off by 1e-4 in ``mean_jerk_mps3``
-and a port bug that returns the wrong SHAPE for ``bone_lengths`` look
-identical from "AssertionError: not close" with no further context. Sorting
-every mismatching key by its worst relative error and printing that table
-(:func:`_assert_close_dict_impl`) turns a bisection session into a five-second
-read.
+:func:`assert_close_dict` compares whole dicts of arrays and reports every
+mismatching key sorted by relative error, rather than aborting on whichever
+key ``dict`` iteration reached first.
 
-Why the skip machinery is markers, not ``pytest.importorskip``
-------------------------------------------------------------------
-The four environment dependencies this benchmark can be missing (a CUDA
-device, network, a trained checkpoint, ffmpeg) are each conditions on the
-*environment*, not on whether a Python import succeeds -- ``torch`` is always
-importable whether or not a GPU exists. Markers let a test declare "I need a
-GPU" once via ``@pytest.mark.gpu`` and get skipped everywhere that's false,
-instead of every GPU test repeating an ``if not torch.cuda.is_available():
-pytest.skip(...)`` guard (and inevitably a few forgetting to).
+The environment dependencies a run can be missing -- a CUDA device, network, a
+trained checkpoint, ffmpeg -- are conditions on the environment, not on
+whether an import succeeds, so they are markers (``@pytest.mark.gpu``, ...)
+wired to skips in :func:`pytest_collection_modifyitems`.
 """
 from __future__ import annotations
 
@@ -36,18 +23,9 @@ __all__ = ["assert_close_dict", "load_golden"]
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 
-#: Env var pointing at a Marionette-ciasc checkout, so `ckpt`-marked tests can
-#: probe for real checkpoints without this file hardcoding anyone's home
-#: directory. Unset (the common case in CI / a fresh clone) => `ckpt` tests
-#: skip with an actionable message rather than erroring on a missing path.
-CKPT_ROOT_ENV = "KINESCORE_CIASC_ROOT"
-
-#: Env var pointing at a Marionette-fkjepa checkout -- a DIFFERENT source
-#: repo from CKPT_ROOT_ENV's Marionette-ciasc (see legacy_docs/PROVENANCE.md's A/B
-#: split). This is where the GR-1 ReadoutV2Head production checkpoint lives
-#: (`model_ckpt/readout_v2_gr1.pt`), so `ckpt`-marked tests that need it
-#: (tests/test_checkpoint_v2_real_ckpt.py) probe this instead.
-FKJEPA_ROOT_ENV = "KINESCORE_FKJEPA_ROOT"
+#: Where trained readers are written (``kinescore train``). ``ckpt``-marked
+#: tests probe it instead of hardcoding a path; unset means they skip.
+CKPT_ROOT_ENV = "KINESCORE_CKPT_DIR"
 
 
 # ===========================================================================
@@ -63,10 +41,8 @@ def _assert_close_dict_impl(got: dict, want: dict, rtol: float = 1e-5,
     got, want:
         Dicts of anything ``np.asarray`` accepts (Python floats, numpy
         arrays, 0-d values straight out of an ``.npz`` file). ``want`` is
-        the golden/legacy side; ``got`` is the side under test -- this
-        ordering only affects which is labelled which in the failure
-        message, not the tolerance check (which is symmetric via
-        ``np.allclose``).
+        the reference side, ``got`` the side under test; the ordering only
+        decides which is labelled which in the failure message.
     rtol, atol:
         Passed straight to :func:`numpy.allclose` for the pass/fail
         decision. The printed ``rel`` column uses ``atol`` as the
@@ -158,17 +134,11 @@ def _load_golden_impl(name: str) -> dict[str, np.ndarray]:
     """Load ``tests/golden/{name}.npz`` into a plain ``dict[str, ndarray]``.
 
     ``name`` may be given with or without the ``.npz`` suffix and with or
-    without a leading ``golden_`` (``"golden_fk"``, ``"fk"``, and
-    ``"golden_fk.npz"`` all resolve to the same file) -- purely a call-site
-    convenience, since every golden fixture in this repo follows the
-    ``golden_<thing>.npz`` naming convention and typing it in full every time
-    a test references it is friction with no payoff.
+    without a leading ``golden_``: ``"golden_fk"``, ``"fk"`` and
+    ``"golden_fk.npz"`` all resolve to the same file.
 
-    Returns a plain ``dict`` (fully materialised, not a lazy ``NpzFile``) so
-    the file handle is closed before the test body runs -- these fixtures are
-    all well under a megabyte (see ``MANIFEST.json``), so eager loading costs
-    nothing and avoids a class of "works until the file handle limit" bugs in
-    long test sessions.
+    Returns a fully materialised ``dict``, not a lazy ``NpzFile``, so the file
+    handle is closed before the test body runs.
     """
     stem = name
     if stem.endswith(".npz"):
@@ -180,9 +150,7 @@ def _load_golden_impl(name: str) -> dict[str, np.ndarray]:
         available = sorted(p.stem for p in GOLDEN_DIR.glob("golden_*.npz"))
         raise FileNotFoundError(
             f"no golden fixture at {path}. Available: {available}. "
-            f"Fixtures are generated by tools/gen_golden.py -- if this repo "
-            f"was freshly cloned, run that script (see MANIFEST.json in "
-            f"{GOLDEN_DIR} for the exact invocation it was last run with)."
+            f"See MANIFEST.json in {GOLDEN_DIR} for how each was produced."
         )
     with np.load(path, allow_pickle=False) as npz:
         return {k: npz[k] for k in npz.files}
@@ -232,26 +200,10 @@ def _ckpt_root() -> Path | None:
     return Path(root) if root else None
 
 
-def _fkjepa_root() -> Path | None:
-    root = os.environ.get(FKJEPA_ROOT_ENV)
-    return Path(root) if root else None
-
-
 def _ckpt_available() -> bool:
-    """``True`` if EITHER real-checkpoint source tree is reachable.
-
-    Two independent checkpoint families live under two independent env
-    vars (see ``CKPT_ROOT_ENV``/``FKJEPA_ROOT_ENV`` above) -- a host with
-    only one checked out should still run the `ckpt`-marked tests that
-    apply to it, so this is an OR, not a requirement that both be present.
-    """
-    ciasc = _ckpt_root()
-    has_ciasc = (ciasc is not None and ciasc.is_dir()
-                and any(ciasc.glob("model_ckpt/*/judge.pt")))
-    fkjepa = _fkjepa_root()
-    has_fkjepa = (fkjepa is not None and fkjepa.is_dir()
-                 and (fkjepa / "model_ckpt" / "readout_v2_gr1.pt").is_file())
-    return has_ciasc or has_fkjepa
+    """``True`` if a trained reader checkpoint is on disk."""
+    root = _ckpt_root()
+    return root is not None and root.is_dir() and any(root.glob("*.pt"))
 
 
 def _ffmpeg_available() -> bool:
@@ -280,8 +232,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
     skip_net = pytest.mark.skip(
         reason="requires network access; none reachable from this host/sandbox")
     skip_ckpt = pytest.mark.skip(
-        reason=f"requires a trained checkpoint on disk; set ${CKPT_ROOT_ENV} to a "
-               f"Marionette-ciasc checkout containing model_ckpt/*/judge.pt "
+        reason=f"requires a trained reader checkpoint; set ${CKPT_ROOT_ENV} to a "
+               f"directory containing <reader_id>.pt "
                f"(currently {_ckpt_root() or 'unset'})")
     skip_ffmpeg = pytest.mark.skip(
         reason="requires the ffprobe/ffmpeg binaries on PATH")

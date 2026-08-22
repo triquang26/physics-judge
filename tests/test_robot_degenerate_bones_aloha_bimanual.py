@@ -1,10 +1,8 @@
-"""ALOHA bimanual rigid-bone filtering (D9 checklist item, see docs/ARCHITECTURE.md#adding-a-robot).
+"""ALOHA bimanual rigid-bone filtering (see docs/ARCHITECTURE.md#adding-a-robot).
 
-Mirrors the Franka gripper case (three bones per arm dropped because an
-endpoint is a non-predicted, gripper-actuated link), doubled for two arms --
-see ``constants.py``'s ``ACTUATED_LINKS`` docstring and
-``legacy_docs/ADDING_ALOHA_NOTES.md``'s "Keypoint / D9 plan" section for the
-worked-out reasoning this implements.
+Mirrors the Franka gripper case -- three bones per arm dropped because an
+endpoint is a non-predicted, gripper-actuated link -- doubled for two arms.
+See ``constants.py``'s ``ACTUATED_LINKS`` docstring.
 
 Requires ``pytorch_kinematics`` + a resolvable ALOHA URDF; skipped entirely
 when unavailable.
@@ -100,9 +98,8 @@ def test_no_support_polygon_no_colliders():
 
 
 def test_registered_under_aloha_bimanual_not_bare_aloha():
-    """The registry key is ``"aloha_bimanual"`` -- the old, descoped configs'
-    bare ``"aloha"`` key is not registered (see spec.py's module docstring
-    and legacy_docs/ADDING_ALOHA_NOTES.md)."""
+    """The registry key is ``"aloha_bimanual"``; a bare ``"aloha"`` is not
+    a robot in this package."""
     from kinescore.robots import available_robots
     assert "aloha_bimanual" in available_robots()
     assert "aloha" not in available_robots()

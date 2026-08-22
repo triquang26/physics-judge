@@ -1,6 +1,6 @@
 """Per-frame violation detectors: one ERROR TYPE = one ``Detector``.
 
-Promotes a validated prototype into this package. Each ``Detector``:
+Each ``Detector``:
 
 * computes a per-frame score from a clip's keypoints (:meth:`Detector.per_frame`),
 * owns a threshold GT-calibrated once via :meth:`Detector.calibrate` (its own
@@ -14,26 +14,19 @@ joint_limit / self_collision), never one pooled list. Adding a new error type
 later is: subclass ``Detector``, append an instance to
 :data:`kinescore.violations.scorer.DETECTORS`.
 
-Two deliberate differences from the prototype
-----------------------------------------------
-1. **No parallel clip type.** The prototype introduced its own
-   ``KeypointClip(P, robot, fps)`` dataclass. This package instead accepts
-   :class:`kinescore.core.metric.MetricContext` -- the repo's existing clip
-   contract (``P``, ``robot``, ``dt``) that every other metric in
-   :mod:`kinescore.metrics` already takes. The one wrinkle:
-   ``MetricContext.P`` is batched ``(B,T,K,3)``, but a violation report is a
+One clip at a time
+-------------------
+Detectors read :class:`kinescore.core.context.ClipContext` (``P``, ``robot``,
+``dt``). ``ClipContext.P`` is batched ``(B,T,K,3)``, but a violation report is a
    per-clip interval list (an ``[i,j]`` frame range has no batch axis to
    reduce over the way a scalar ``MetricValue`` does), so every method here
    requires ``ctx.P.shape[0] == 1`` and works internally on the squeezed
    ``(T,K,3)`` via :func:`_single_clip_P`. Score one clip per call; a batch
    of clips is a Python-level loop over :class:`ViolationScorer.score`, not a
    vectorised batch dimension.
-2. **Nothing is hardcoded to one robot.** The prototype's
-   ``RigidityDetector`` defaulted ``rigid_idx=(0, 2, 3)`` inline -- a
-   Franka-specific tuple with no explanation at the call site. Here it is a
-   constructor argument with no default robot baked in; see
-   :class:`RigidityDetector` for what it means and why a robot might need to
-   narrow it.
+Nothing is hardcoded to one robot: per-robot choices such as
+:class:`RigidityDetector`'s ``rigid_idx`` are constructor arguments with no
+default robot baked in.
 """
 from __future__ import annotations
 
@@ -42,7 +35,7 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
-from kinescore.core.metric import MetricContext
+from kinescore.core.context import ClipContext
 
 __all__ = [
     "Detector",
@@ -54,10 +47,10 @@ __all__ = [
 ]
 
 
-def _single_clip_P(ctx: MetricContext) -> torch.Tensor:
+def _single_clip_P(ctx: ClipContext) -> torch.Tensor:
     """``ctx.P`` squeezed to ``(T,K,3)``, enforcing the single-clip contract.
 
-    ``MetricContext.P`` is batched ``(B,T,K,3)`` everywhere else in the
+    ``ClipContext.P`` is batched ``(B,T,K,3)`` everywhere else in the
     package; every ``Detector`` here scores exactly one clip per call (see
     the module docstring), so a batch size other than 1 is a caller error,
     not something to silently reduce over.
@@ -67,7 +60,7 @@ def _single_clip_P(ctx: MetricContext) -> torch.Tensor:
     if ctx.P.shape[0] != 1:
         raise ValueError(
             f"Detector scores one clip per call; got batch size "
-            f"{ctx.P.shape[0]}. Build one MetricContext per clip and loop.")
+            f"{ctx.P.shape[0]}. Build one ClipContext per clip and loop.")
     return ctx.P[0]
 
 
@@ -90,11 +83,11 @@ class Detector:
     def __init__(self) -> None:
         self.threshold: float | None = None
 
-    def per_frame(self, ctx: MetricContext) -> np.ndarray:
+    def per_frame(self, ctx: ClipContext) -> np.ndarray:
         """Per-frame score ``(T,)`` for one clip. Must be overridden."""
         raise NotImplementedError
 
-    def fit(self, gt_contexts: Sequence[MetricContext]) -> None:
+    def fit(self, gt_contexts: Sequence[ClipContext]) -> None:
         """Learn detector-specific state from GT clips, before :meth:`calibrate`.
 
         No-op by default. Override when the threshold needs global GT
@@ -138,7 +131,7 @@ class Detector:
                 i += 1
         return out
 
-    def report(self, ctx: MetricContext) -> dict:
+    def report(self, ctx: ClipContext) -> dict:
         """Score one clip: threshold, flagged fraction, severity, and this detector's own intervals.
 
         ``fraction`` (flagged-frame %) saturates at 100% once nearly every
@@ -173,10 +166,9 @@ class Detector:
 class RigidityDetector(Detector):
     """Warp: a rigid arm link stretches/shrinks from its true URDF length.
 
-    Reads ``robot.rigid_bone_pairs`` / ``robot.rigid_bone_lengths`` -- the
-    same degenerate-bone-free geometry :class:`kinescore.metrics.rigidity.RigidityResidual`
-    uses (see that module's Defect D9), so a gripper opening never registers
-    as a rigidity violation here either.
+    Reads ``robot.rigid_bone_pairs`` / ``robot.rigid_bone_lengths``, the
+    degenerate-bone-free geometry, so a gripper opening never registers as a
+    rigidity violation.
 
     Parameters
     ----------
@@ -191,10 +183,9 @@ class RigidityDetector(Detector):
         such a bone has a well-defined rest length at any single pose, but
         that length is not constant across poses, so treating it as "rigid"
         manufactures a rigidity violation out of ordinary motion. The Franka
-        arm used here during validation needed exactly this: its bone index
-        1 (between two keypoints that straddle a rotating joint) had to be
-        dropped, leaving only genuinely rigid bones via
-        ``rigid_idx=(0, 2, 3)``. This is a per-robot URDF-topology fact this
+        needs exactly this: its bone index 1 spans a rotating joint, so only
+        ``rigid_idx=(0, 2, 3)`` are genuinely rigid. That is a per-robot
+        URDF-topology fact this
         detector cannot infer from ``rigid_bone_pairs`` alone, so it is a
         constructor argument the caller resolves once per robot, not an
         auto-detected default.
@@ -210,7 +201,7 @@ class RigidityDetector(Detector):
     def _resolve_idx(self, n_bones: int) -> list[int]:
         return self.rigid_idx if self.rigid_idx is not None else list(range(n_bones))
 
-    def per_frame(self, ctx: MetricContext) -> np.ndarray:
+    def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         robot = ctx.robot
         bone_pairs = [(int(a), int(b)) for a, b in robot.rigid_bone_pairs]
@@ -229,7 +220,7 @@ class JerkDetector(Detector):
     name = "jerk"
     units = "mm/frame^3"
 
-    def per_frame(self, ctx: MetricContext) -> np.ndarray:
+    def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         T = len(P)
         out = np.zeros(T)
@@ -246,7 +237,7 @@ class TeleportDetector(Detector):
     name = "teleport"
     units = "mm/frame"
 
-    def per_frame(self, ctx: MetricContext) -> np.ndarray:
+    def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         T = len(P)
         out = np.zeros(T)
@@ -268,9 +259,8 @@ class JointLimitDetector(Detector):
     ----------
     lo_q, hi_q:
         Quantiles (in ``[0, 1]``) of the GT bend-angle distribution that
-        define the per-joint envelope in :meth:`fit`. Defaults (0.01, 0.99)
-        match the validated prototype: trimming the 1% tails keeps one noisy
-        GT frame from blowing the envelope open.
+        define the per-joint envelope in :meth:`fit`. Trimming the 1% tails
+        keeps one noisy GT frame from blowing the envelope open.
     """
 
     name = "joint_limit"
@@ -291,12 +281,12 @@ class JointLimitDetector(Detector):
         cos = (b1 * b2).sum(-1) / (b1.norm(dim=-1) * b2.norm(dim=-1) + 1e-6)
         return torch.rad2deg(torch.acos(cos.clamp(-1, 1)))
 
-    def fit(self, gt_contexts: Sequence[MetricContext]) -> None:
+    def fit(self, gt_contexts: Sequence[ClipContext]) -> None:
         ang = torch.cat([self._bend(_single_clip_P(c)) for c in gt_contexts], dim=0)
         self.lo = torch.quantile(ang, self.lo_q, dim=0)
         self.hi = torch.quantile(ang, self.hi_q, dim=0)
 
-    def per_frame(self, ctx: MetricContext) -> np.ndarray:
+    def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         if self.lo is None:
             return np.zeros(len(P))
@@ -311,9 +301,9 @@ class SelfCollisionDetector(Detector):
     Parameters
     ----------
     non_adjacent_gap:
-        Minimum keypoint-index gap for a pair to be scored (default 2,
-        matching the prototype: pairs ``(i, j)`` with ``j >= i + 2``, which
-        excludes only bone-connected neighbours). A robot whose keypoint
+        Minimum keypoint-index gap for a pair to be scored: at the default
+        2, pairs ``(i, j)`` with ``j >= i + 2``, which excludes only
+        bone-connected neighbours. A robot whose keypoint
         chain has short, non-bone-connected branches close together (e.g.
         two gripper fingertips one index apart) may need a larger gap so
         those pairs -- close by construction, not by fault -- do not
@@ -328,7 +318,7 @@ class SelfCollisionDetector(Detector):
         super().__init__()
         self.non_adjacent_gap = int(non_adjacent_gap)
 
-    def per_frame(self, ctx: MetricContext) -> np.ndarray:
+    def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         K = P.shape[1]
         pairs = [(i, j) for i in range(K) for j in range(i + self.non_adjacent_gap, K)]

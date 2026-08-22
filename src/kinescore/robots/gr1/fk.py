@@ -22,18 +22,9 @@ in ``kinescore.core.reader`` for why no squash sits in the prediction path itsel
 Frozen, analytic, fully differentiable (``pytorch_kinematics``). No trainable
 weights.
 
-Provenance
-----------
-Ported from ``models/kinematics/gr1_fk.py`` (Marionette-fkjepa). Every method
-body below is unchanged from the source **except**
-:meth:`GR1FK.hand_flexion_mean`, which is the source's ``state_to_gripper``
-renamed (identical implementation, zero numeric change) -- see that method's
-docstring for why the rename was required rather than merely nice-to-have.
-``kinescore.robots.gr1.spec.GR1Spec`` is the new code that wraps this class
-(and :class:`~kinescore.robots.gr1.colliders.RobotColliders`) into a
-``RobotSpec``; nothing in *this* file references ``kinescore`` at all, which is
-what "ported verbatim" is meant to guarantee -- an independent reader can diff
-this file against the source and see nothing but the rename and this docstring.
+:class:`~kinescore.robots.gr1.spec.GR1Spec` wraps this class and
+:class:`~kinescore.robots.gr1.colliders.RobotColliders` into a
+:class:`~kinescore.core.robot.RobotSpec`.
 """
 from __future__ import annotations
 
@@ -386,18 +377,11 @@ class GR1FK(nn.Module):
     def hand_flexion_mean(state44: torch.Tensor) -> torch.Tensor:
         """``(...,44) -> (...,2)`` left/right mean raw hand-motor flexion.
 
-        Renamed from the source's ``state_to_gripper``. Its docstring there
-        claimed the output was "normalised to [0,1]"; the implementation below
-        -- unchanged from the source -- is just ``.mean(-1)`` over the 6-dim
-        Fourier hand-motor block, with **no normalisation applied**. The raw
-        block is not bounded to ``[0,1]`` in general (see ``_FINGERS`` /
-        ``FINGER_JOINTS`` in this module: ``hand6`` is documented there as
-        living in ``[0, ~1.5]``), so a caller trusting the old docstring and
-        the old name ("gripper", implying an open/close fraction like
-        Franka's) would silently get values outside ``[0,1]``. The name now
-        says exactly what is computed -- a mean flexion, in the hand's native
-        units -- and callers that want an actual ``[0,1]`` proxy must
-        normalise themselves against the block's known range.
+        A plain ``.mean(-1)`` over the 6-dim Fourier hand-motor block, with
+        **no normalisation applied**: the raw block is not bounded to
+        ``[0,1]`` (see ``_FINGERS`` / ``FINGER_JOINTS`` in this module --
+        ``hand6`` lives in ``[0, ~1.5]``). A caller that wants a ``[0,1]``
+        open/close proxy must normalise against the block's known range.
         """
         lh = state44[..., 7:13].mean(-1, keepdim=True)
         rh = state44[..., 29:35].mean(-1, keepdim=True)

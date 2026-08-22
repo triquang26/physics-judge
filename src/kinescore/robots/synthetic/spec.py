@@ -1,23 +1,11 @@
 """``Synthetic2R``: an analytic 2-link planar arm, no URDF, no network, no
 ``pytorch_kinematics``.
 
-Why this exists
-----------------
-Franka and GR-1 both need a real URDF and (for Franka) network-cached
-``robot_descriptions`` assets, so every test that touches them is either
-``@pytest.mark.net``/``ckpt``-gated or depends on a machine-specific asset
-checkout. That makes them unsuitable for testing the *metric* layer itself --
-whether a rigidity residual, a jerk, a joint-limit-violation term is computed
-correctly is a question about the metric's math, not about Panda geometry, and
-should be answerable in a CPU-only, dependency-light unit test that runs in
-CI on a fresh checkout with nothing configured.
-
-``Synthetic2R`` is the robot that makes that possible: closed-form FK (two
-``sin``/``cos`` evaluations), no I/O, no optional dependency. Every metric
-that only needs a ``RobotSpec`` can be exercised end-to-end against hand-
-computable positions (see ``tests/test_robot_synthetic.py``), and the metric
-suite's own tests can build a whole scoring pipeline without ever importing
-``pytorch_kinematics``.
+The URDF-backed robots need real assets, which makes them unsuitable for
+testing the detector layer itself: whether a rigidity residual, a jerk or a
+joint-limit term is computed correctly is a question about that math, not
+about Panda geometry. ``Synthetic2R`` answers it in a CPU-only test with
+closed-form FK, no I/O and no optional dependency.
 
 Geometry
 --------
@@ -25,23 +13,11 @@ Two revolute joints in the XY plane, base at the origin::
 
     base (0,0,0) --[link1: l1]--> elbow --[link2: l2]--> tip
 
-``q = [theta1, theta2]`` are the two joint angles in radians, ``theta1``
-measured from the +X axis and ``theta2`` relative to link 1 (i.e. standard
-2-link planar arm angle convention, elbow angle is ``theta1 + theta2``). This
-is intentionally the simplest arm for which "bone length must stay constant
-under rotation" (rigidity) and "elbow position is a nonlinear function of both
-joints" (so d(tip)/dq is not diagonal) both hold -- the two properties any
-FK-consuming metric needs to be exercised against.
-
-Package layout
---------------
-Lives under ``robots/synthetic/`` (not a flat ``synthetic.py``) purely for
-uniformity with every other robot in this package (``franka/``, ``gr1/``,
-``airbot_mmk2/`` are each a package); there is no ``fk.py``/``constants.py``
-split here because this robot has no URDF-derived geometry to separate out --
-the whole FK is the closed form below. ``robots/synthetic/__init__.py``
-re-exports :class:`Synthetic2R` so ``from kinescore.robots.synthetic import
-Synthetic2R`` keeps resolving unchanged for every existing caller.
+``q = [theta1, theta2]`` in radians, ``theta1`` measured from the +X axis and
+``theta2`` relative to link 1, so the elbow angle is ``theta1 + theta2``. This
+is the simplest arm for which "bone length stays constant under rotation" and
+"tip position is a nonlinear function of both joints" both hold -- the two
+properties any FK-consuming detector must be exercised against.
 """
 from __future__ import annotations
 
@@ -73,7 +49,7 @@ class Synthetic2R:
     ``{ROTATIONS}`` only: this is a planar arm with no gripper, no feet and no
     ported collision geometry, but its FK still has a well-defined in-plane
     orientation at each keypoint (see :meth:`forward_transforms`), which is
-    enough signal to exercise angular-velocity/acceleration metrics.
+    enough signal to exercise angular velocity and acceleration.
     """
 
     name = "synthetic_2r"

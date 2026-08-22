@@ -1,55 +1,22 @@
-"""URDF joint/link names for ALOHA bimanual, and the verified real-data mapping.
+"""URDF joint/link names for ALOHA bimanual, and the real-data mapping.
 
-Joint semantics -- VERIFIED against real data, not assumed
--------------------------------------------------------------
-``legacy_docs/ADDING_ALOHA_NOTES.md`` (the prior round's handoff) hypothesised the
-14-dim ``action`` / 42-dim ``observation.state`` layout from the published
-ALOHA/ACT convention alone, without loading a parquet. This round did:
+Joint layout
+------------
+``meta/modality.json`` in the published trees states the layout directly::
 
-* ``meta/modality.json`` (every one of the 16
-  ``video_gen_physics_real_video/bimanual/multiview/makovian/<task>/`` trees
-  carries an identical one) states explicitly::
+    state:  qpos[0:14], qvel[14:28], effort[28:42]
+    action: qpos[0:14]
 
-      state:  qpos[0:14], qvel[14:28], effort[28:42]
-      action: qpos[0:14]
-
-  i.e. ``observation.state`` is ``[qpos(14), qvel(14), effort(14)]`` and
-  ``action`` is a 14-dim commanded ``qpos`` -- confirming the prior round's
-  hypothesis exactly, this time from the dataset's own metadata rather than
-  the general ACT convention.
-* ``meta/stats.json`` (``close_cardboard_box`` task) per-column min/max was
-  cross-checked against ``aloha_bimanual.urdf``'s ``<limit>`` values:
-  ``action`` index 1 ranges ``[-1.275, 0.253]`` against the URDF's
-  ``left/shoulder`` limit ``[-1.850, 1.257]`` (upper bound nearly saturated);
-  index 2 ranges ``[-0.112, 1.578]`` against ``left/elbow``'s
-  ``[-1.763, 1.606]`` (upper bound nearly saturated); index 8 ranges
-  ``[-1.229, -0.018]`` against ``right/shoulder``'s ``[-1.850, 1.257]``
-  (entirely on the lower half, mirroring index 1's arm on the other side);
-  index 9 ranges ``[0.808, 1.552]`` against ``right/elbow``'s
-  ``[-1.763, 1.606]`` (entirely on the upper half, mirroring index 2). Indices
-  6 and 13 (``[-0.618,-0.130]`` / ``[-0.598,-0.034]``) both sit in the real
-  Interbotix vx300s gripper joint's practical range and are symmetric between
-  the two arms -- the seventh ("gripper") slot per arm.
-* A raw parquet read (``episode_000026.parquet``, ``close_cardboard_box``)
-  confirms ``observation.state[:, :14]`` tracks ``action`` closely
-  frame-to-frame for the six arm channels per side (sub-0.03 rad delta) and
-  diverges more for the two gripper channels (~0.4-0.6 rad delta, consistent
-  with ``action`` being a *commanded* target the slower gripper servo has not
-  yet reached) -- exactly the "state tracks a commanded action" relationship
-  expected of ``qpos``/target pairs, not two independent quantities.
-
-This confirms the per-arm 7-slot order
+so ``observation.state`` is ``[qpos(14), qvel(14), effort(14)]`` and ``action``
+is a 14-dim commanded ``qpos``. The per-arm 7-slot order is
 ``[waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate, gripper]``
-(matching ``tonyzhaozh/aloha``'s ``JOINT_NAMES`` -- and, independently, this
-URDF's own per-arm joint declaration order, see ``aloha_bimanual.urdf``),
-left arm first then right (``action[0:7]`` = left, ``action[7:14]`` = right),
-mirroring how GR-1's 44-dim state orders left-then-right.
+-- matching this URDF's own per-arm joint declaration order -- left arm first,
+then right (``action[0:7]`` left, ``action[7:14]`` right).
 
 Only the 12 arm joints (6 revolute per side, indices 0-5 and 7-12 of the
-14-slot layout) are predicted here -- see ``fk.py``'s module docstring for
-why the 7th slot per side (gripper) is carried through ``aux`` instead of
-``q``, the same split :class:`~kinescore.robots.franka.spec.FrankaSpec` uses
-for the Panda's finger joints.
+14-slot layout) are predicted. The 7th slot per side is the gripper, carried
+through ``aux`` rather than ``q`` -- see ``fk.py`` -- the same split the Panda
+uses for its finger joints.
 """
 from __future__ import annotations
 

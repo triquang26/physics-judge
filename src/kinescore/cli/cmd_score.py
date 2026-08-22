@@ -1,115 +1,145 @@
-"""``kinescore score``: run the benchmark over a manifest, streaming to disk.
-
-Thin CLI wrapper around :func:`kinescore.bench.runner.run`. The one piece of
-logic that lives here rather than there is the timebase cross-check: every
-row's ``fps``/``dt`` is re-resolved through
-:func:`kinescore.cli._scoring.apply_resolved_timebase` (which calls
-:func:`kinescore.video.probe.resolve_timebase`) before scoring, so
-``--fps``/``--dt`` can never silently win over what the file on disk actually
-is -- see that function's docstring and ``kinescore.video.probe``'s module
-docstring for the defect (D3) this replaces.
-"""
+"""``kinescore score``: judge a directory of generated clips for one cell."""
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 
 NAME = "score"
-HELP = "score clips against a manifest with a trained reader"
+HELP = "score generated clips against physics thresholds calibrated on real motion"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    from kinescore.cli._scoring import add_common_arguments
+    from kinescore.cli._shared import add_config_arguments
 
-    parser.add_argument("--manifest", required=True,
-                        help="manifest file (.parquet or .json) from "
-                             "`kinescore manifest`")
-    add_common_arguments(parser, require_reader=True)
-    parser.add_argument("--out", required=True,
-                        help="output directory; results.jsonl is written here")
-    resume = parser.add_mutually_exclusive_group()
-    resume.add_argument("--resume", action="store_true",
-                        help="skip clips already scored by this reader+suite")
-    resume.add_argument("--force", action="store_true",
-                        help="truncate results.jsonl and rescore everything")
+    parser.add_argument("--cell", help="cell id, e.g. single_arm.mv3_row.ctrlworld")
+    parser.add_argument("--list", action="store_true",
+                        help="print every declared cell and its status")
+    parser.add_argument("--videos", default=None,
+                        help="directory of clips to score (default: the "
+                             "cell's canonical score tree). Searched "
+                             "recursively for *.mp4")
+    parser.add_argument("--checkpoint", default=None,
+                        help="reader checkpoint (default: the reader's own)")
+    parser.add_argument("--out", default=None,
+                        help="output directory (default: the cell's own)")
+    parser.add_argument("--calibration-clips", type=int, default=24,
+                        help="real clips the thresholds are fitted on")
+    parser.add_argument("--percentile", type=float, default=95.0,
+                        help="threshold percentile over real motion")
     parser.add_argument("--max-frames", type=int, default=0,
-                        help="cap frames per clip, applied after any stride "
-                             "(0 = every probed frame)")
-    parser.add_argument("--quiet", action="store_true",
-                        help="don't print one line per scored clip")
-    parser.add_argument("--traces", action="store_true",
-                        help="also write per-frame traces (jerk-over-time, "
-                             "per-frame rigidity deviation, ...) to "
-                             "<out>/traces.npz + <out>/traces_index.jsonl "
-                             "(see kinescore.bench.traces). Default off: "
-                             "results.jsonl is identical either way, this "
-                             "only adds the sidecar files")
+                        help="cap frames per clip (0 = all)")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="cap clips scored (0 = all)")
+    parser.add_argument("--device", default="cuda")
+    add_config_arguments(parser)
+
+
+def _clips(root: str, limit: int) -> list[str]:
+    import glob
+    import os
+
+    found = sorted(glob.glob(os.path.join(root, "**", "*.mp4"), recursive=True))
+    return found[:limit] if limit else found
 
 
 def run(args: argparse.Namespace) -> int:
-    from kinescore.bench.manifest import load_manifest
-    from kinescore.bench.runner import run as run_bench
-    from kinescore.cli._provenance import provenance_block, write_json
-    from kinescore.cli._scoring import (
-        apply_resolved_timebase,
-        build_scorer,
-        view_layout_from_args,
+    import json
+
+    import torch
+
+    from kinescore.cli._shared import load, now, resolve_cell
+    from kinescore.core.context import ClipContext
+    from kinescore.readers.checkpoint import ReaderExpectation, load_reader
+    from kinescore.registry.provenance import (
+        run_manifest,
+        sha256_file,
+        write_run_manifest,
     )
-    from kinescore.core.clip import TimebaseError
+    from kinescore.robots import get_robot
+    from kinescore.video.probe import resolve_timebase
+    from kinescore.video.reader import load_rgb
+    from kinescore.violations import ViolationScorer
 
-    view_layout = view_layout_from_args(args)
-    rows = load_manifest(args.manifest)
-    if not rows:
-        print(f"[score] manifest {args.manifest!r} has no rows", file=sys.stderr)
-        return 1
+    registry = load(args)
+    if args.list or not args.cell:
+        for cell_id, cell in sorted(registry.cells.items()):
+            print(f"{cell_id:42s} {cell.robot:16s} {cell.reader.reader_id:34s} "
+                  f"{cell.status or 'ready'}")
+        return 0 if args.list else 1
 
-    print(f"[score] cross-checking timebase for {len(rows)} clip(s) "
-          f"against ffprobe...")
-    try:
-        rows = apply_resolved_timebase(rows, fps=args.fps, dt=args.dt,
-                                       view_layout=view_layout)
-    except (ValueError, TimebaseError) as exc:
-        print(f"[score] timebase error: {exc}", file=sys.stderr)
-        raise
+    cell = resolve_cell(registry, args.cell)
+    if cell.status:
+        raise SystemExit(f"cell {cell.cell_id!r}: {cell.status}")
 
-    scorer = build_scorer(args, view_layout)
-    if scorer.reader.limit_semantics == "raw_rad":
-        print(f"[score] reader {scorer.reader.reader_id!r} is raw_rad: "
-              f"limit_violation_frac/limit_excess_rad are OBSERVABLE for this "
-              f"run (see legacy_docs/PROVENANCE.md D7). No sigma-gate is applied by "
-              f"this command -- every frame is scored; pass a `gate=` to "
-              f"kinescore.core.scorer.Scorer yourself for a gated run.")
+    started = now()
+    layout = cell.view.layout()
+    robot = get_robot(cell.robot)
+    checkpoint = args.checkpoint or str(cell.reader.checkpoint_path)
+    reader = load_reader(
+        checkpoint, robot=robot, view_layout=layout, device=args.device,
+        reader_id=cell.reader.reader_id,
+        expect=ReaderExpectation(
+            cell_id=cell.cell_id, robot=cell.robot,
+            view_id=cell.view.view_id, n_views=layout.n_views,
+            packing=layout.packing))
 
-    results_path = os.path.join(args.out, "results.jsonl")
+    def read(path: str) -> ClipContext:
+        clip = resolve_timebase(path, view_layout=layout)
+        cell.view.check_frame_size(clip.width, clip.height)
+        frames = load_rgb(clip, max_frames=args.max_frames)
+        with torch.no_grad():
+            out = reader.read(frames.to(args.device))
+        return ClipContext(dt=clip.dt, P=out.P.float().cpu(), robot=robot,
+                           flags={"path": path})
 
-    trace_store = None
-    if args.traces:
-        from kinescore.bench.traces import TraceStore
+    real_root = cell.reader.train_tree / "videos" / "val"
+    real = _clips(str(real_root), args.calibration_clips)
+    if not real:
+        raise SystemExit(
+            f"no real clips under {real_root} to calibrate thresholds on -- "
+            f"run `kinescore data --reader {cell.reader.reader_id}` first")
+    print(f"[score] calibrating on {len(real)} real clip(s) from {real_root}")
+    scorer = ViolationScorer()
+    scorer.calibrate([read(p) for p in real], pct=args.percentile)
 
-        trace_store = TraceStore(os.path.join(args.out, "traces.npz"))
-        quantity_keys = scorer.suite.quantity_keys
-        print(f"[score] --traces: writing per-frame arrays for "
-              f"{len(quantity_keys)} metric(s) ({', '.join(quantity_keys)}) "
-              f"to {trace_store.path!r} + {trace_store.index_path!r}")
+    videos = args.videos or str(cell.score_tree)
+    clips = _clips(videos, args.limit)
+    if not clips:
+        raise SystemExit(f"no *.mp4 under {videos}")
 
-    def _progress(row: dict, status: str) -> None:
-        if not args.quiet:
-            print(f"[score] {status:8s} {row.get('path')}")
+    out_dir = args.out or str(cell.output_dir)
+    import os
 
-    summary = run_bench(rows, scorer, results_path, resume=args.resume,
-                        force=args.force, max_frames=args.max_frames,
-                        view_layout=view_layout, progress=_progress,
-                        trace_store=trace_store)
-    print(f"[score] done: {summary}")
+    os.makedirs(out_dir, exist_ok=True)
+    results_path = os.path.join(out_dir, "results.jsonl")
+    n_failed = 0
+    with open(results_path, "w") as f:
+        for i, path in enumerate(clips, 1):
+            try:
+                report = scorer.score(read(path))
+            except Exception as exc:  # noqa: BLE001 -- recorded, not swallowed
+                n_failed += 1
+                f.write(json.dumps({"path": path, "error": f"{type(exc).__name__}: {exc}"}) + "\n")
+                print(f"[score] failed  {path}: {exc}")
+                continue
+            f.write(json.dumps({"path": path, "cell_id": cell.cell_id,
+                                "violations": report}) + "\n")
+            print(f"[score] {i}/{len(clips)} {os.path.basename(path)}")
 
-    dt_sources = sorted({r.get("dt_source") for r in rows})
-    dts = sorted({r.get("dt") for r in rows})
-    prov = provenance_block(
-        suite_id=scorer.suite.suite_id, suite_name=scorer.suite.name,
-        robot=args.robot, reader_id=scorer.reader.reader_id,
-        resolved_dt=dts if len(dts) > 1 else (dts[0] if dts else None),
-        dt_sources=dt_sources, summary=summary)
-    write_json(os.path.join(args.out, "provenance.json"), prov)
-
-    return 0 if summary["n_failed"] == 0 else 1
+    summary = {
+        "cell_id": cell.cell_id,
+        "reader_id": cell.reader.reader_id,
+        "checkpoint": checkpoint,
+        "checkpoint_sha256": sha256_file(checkpoint),
+        "videos": videos,
+        "n_clips": len(clips),
+        "n_failed": n_failed,
+        "n_calibration_clips": len(real),
+        "percentile": args.percentile,
+        "thresholds": scorer.thresholds(),
+    }
+    with open(os.path.join(out_dir, "summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+    write_run_manifest(out_dir, run_manifest(
+        NAME, started_at=started, sources=registry.sources, extra=summary))
+    print(f"[score] {len(clips) - n_failed} scored, {n_failed} failed -> {out_dir}")
+    return 0 if n_failed == 0 else 1

@@ -1,29 +1,19 @@
 """``RobotSpec`` for ALOHA bimanual: two 6-DOF arms + 2-finger grippers, table-mounted.
 
-:class:`AlohaSpec` wraps :class:`~kinescore.robots.aloha.fk.AlohaFK` (two arm
-chains, gripper aux -- see that module's docstring) and adapts it to the
-frozen ``RobotSpec`` protocol (``kinescore.core.robot``). Structurally this
-combines two precedents already in this package: bimanual, per-side keypoint
-concatenation like :class:`~kinescore.robots.gr1.spec.GR1Spec` /
-:class:`~kinescore.robots.airbot_mmk2.spec.AirbotMMK2Spec`, and a real
-gripper handled through ``aux`` with a D9 structural exclusion like
-:class:`~kinescore.robots.franka.spec.FrankaSpec` -- doubled for two arms.
+:class:`AlohaSpec` wraps :class:`~kinescore.robots.aloha.fk.AlohaFK` and
+adapts it to the :class:`~kinescore.core.robot.RobotSpec` protocol: bimanual
+per-side keypoint concatenation, plus a real gripper handled through ``aux``
+with a structural bone exclusion, doubled for two arms.
 
-Registered under the key ``"aloha_bimanual"`` (not the bare ``"aloha"`` the
-descoped prior round's configs used -- see ``legacy_docs/ADDING_ALOHA_NOTES.md`` and
-this package's own registry, which treats the registry key as the single
-naming system).
+Registered under the key ``"aloha_bimanual"``.
 
 Why no ``COLLIDERS`` / ``SUPPORT_POLYGON``
 ---------------------------------------------
-``aloha_bimanual.urdf`` is kinematics-only (joint origins/axes/limits/
-inertials, no mesh geometry -- see ``KINESCORE_ASSETS/aloha/urdf/MANIFEST.json``),
-so there is no collision primitive to back ``COLLIDERS`` with; declaring it
-without one would be exactly the "declared-but-unbacked capability, worse
-than undeclared" case ``core/robot.py``'s module docstring warns about.
-ALOHA is two arms bolted to a table (no legs, no feet, no mobile base) --
-same as :class:`FrankaSpec`, ``SUPPORT_POLYGON`` would have no balance margin
-to report and must not be declared.
+``aloha_bimanual.urdf`` is kinematics-only (joint origins, axes, limits,
+inertials -- no mesh geometry), so there is no collision primitive to back
+``COLLIDERS`` with, and a declared-but-unbacked capability is worse than an
+undeclared one. ALOHA is two arms bolted to a table: no legs, no mobile base,
+so ``SUPPORT_POLYGON`` has no balance margin to report either.
 """
 from __future__ import annotations
 
@@ -44,10 +34,9 @@ from kinescore.robots.urdf import resolve_asset_urdf, sha256_file
 
 __all__ = ["AlohaSpec", "ALOHA_URDF_RELPATH"]
 
-#: Location of the composite bimanual URDF relative to ``KINESCORE_ASSETS``.
-#: See ``KINESCORE_ASSETS/aloha/urdf/`` (and ``legacy_docs/ADDING_ALOHA_NOTES.md``
-#: for full provenance: two Interbotix vx300s arms, xacro-expanded and merged
-#: under a synthetic ``world`` root with the Menagerie ALOHA mount transforms).
+#: Location of the composite bimanual URDF relative to ``KINESCORE_ASSETS``:
+#: two Interbotix vx300s arms, xacro-expanded and merged under a synthetic
+#: ``world`` root with the Menagerie ALOHA mount transforms.
 ALOHA_URDF_RELPATH = "aloha/urdf/aloha_bimanual.urdf"
 
 

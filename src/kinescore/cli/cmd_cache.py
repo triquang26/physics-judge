@@ -1,81 +1,63 @@
-"""``kinescore cache``: precompute frozen-backbone tokens for training.
-
-Thin wrapper around :func:`kinescore.training.cache.precompute_cache` -- see
-that module's docstring for the on-disk layout (``video_root/split/{ep}.mp4``
-+ ``annotation_root/split/{ep}.json``) and why the cache files it writes are
-self-describing.
-"""
+"""``kinescore cache``: encode a reader's train tree with the frozen backbone."""
 from __future__ import annotations
 
 import argparse
 
 NAME = "cache"
-HELP = "precompute frozen-backbone patch tokens for training"
+HELP = "precompute frozen-backbone tokens for a reader's train tree"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--video-root", required=True,
-                        help="root containing {split}/{episode}.mp4 clips")
-    parser.add_argument("--annotation-root", required=True,
-                        help="root containing {split}/{episode}.json "
-                             "annotations (joint_source must be 'real')")
-    parser.add_argument("--out", required=True,
-                        help="output cache root; writes {out}/{split}/{episode}.pt")
-    parser.add_argument("--split", action="append", default=None,
-                        help="split(s) to process (repeatable; default: val, train)")
-    parser.add_argument("--pattern", default="*.mp4")
-    parser.add_argument("--dino-model", default="dinov3_vitl16")
-    parser.add_argument("--embed-dim", type=int, default=1024)
-    parser.add_argument("--dino-input", type=int, default=224)
-    parser.add_argument("--patch-pool", type=int, default=2)
-    parser.add_argument("--dino-repo-dir", default="",
-                        help="local facebookresearch/dinov2 clone (DINOv2 "
-                             "models only; DINOv3 loads from the HF cache)")
-    parser.add_argument("--n-views", type=int, default=1)
-    parser.add_argument("--view-order", default=None)
-    parser.add_argument("--max-frames", type=int, default=0)
-    parser.add_argument("--frame-chunk", type=int, default=0,
-                        help="encode at most this many frames of an episode "
-                             "per backbone call (0 = whole episode at once, "
-                             "the historical behaviour); set this on a long "
-                             "episode + high --dino-input to avoid OOMing a "
-                             "shared GPU -- see training/cache.py::encode_clip")
+    from kinescore.cli._shared import add_config_arguments
+
+    parser.add_argument("--reader", required=True, help="reader id")
+    parser.add_argument("--splits", default="train,val",
+                        help="comma-separated splits to encode")
+    parser.add_argument("--device", default="cuda",
+                        help="where the backbone runs")
     parser.add_argument("--limit", type=int, default=0,
                         help="cap episodes per split (0 = all)")
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="re-encode episodes that are already cached")
+    parser.add_argument("--frame-chunk", type=int, default=32,
+                        help="frames per backbone call; lower this if a long "
+                             "episode exhausts GPU memory")
+    parser.add_argument("--max-frames", type=int, default=0,
+                        help="cap decoded frames per episode (0 = all)")
+    add_config_arguments(parser)
 
 
 def run(args: argparse.Namespace) -> int:
-    from kinescore.cli._provenance import provenance_block, write_json
-    from kinescore.cli._scoring import view_layout_from_args
-    from kinescore.training.cache import backbone_id, build_backbone, precompute_cache
+    from kinescore.backbones.default import build_backbone
+    from kinescore.cli._shared import load, now, resolve_reader
+    from kinescore.registry.provenance import run_manifest, write_run_manifest
+    from kinescore.training.cache import CacheBuilder
 
-    view_layout = view_layout_from_args(args)
-    backbone = build_backbone(
-        dino_model=args.dino_model, embed_dim=args.embed_dim,
-        dino_input=args.dino_input, patch_pool=args.patch_pool,
-        dino_repo_dir=args.dino_repo_dir, view_layout=view_layout,
-        device=args.device)
+    registry = load(args)
+    reader = resolve_reader(registry, args.reader)
+    tree = reader.train_tree
+    if not tree.is_dir():
+        raise SystemExit(
+            f"no train tree at {tree} -- run `kinescore data --reader "
+            f"{reader.reader_id}` first")
 
-    splits = args.split or ["val", "train"]
-    totals = {"n_done": 0, "n_skipped_existing": 0, "n_skipped_no_annotation": 0}
-    for split in splits:
-        summary = precompute_cache(
-            video_root=args.video_root, annotation_root=args.annotation_root,
-            out_root=args.out, split=split, backbone=backbone,
-            view_layout=view_layout, pattern=args.pattern, limit=args.limit,
+    started = now()
+    layout = reader.view.layout()
+    backbone = build_backbone(layout, device=args.device)
+    builder = CacheBuilder(backbone, layout, reader.reader_id)
+
+    totals: dict[str, dict[str, int]] = {}
+    for split in [s.strip() for s in args.splits.split(",") if s.strip()]:
+        totals[split] = builder.build_split(
+            video_root=str(tree / "videos"),
+            annotation_root=str(tree / "annotation"),
+            out_root=str(reader.cache_dir), split=split, limit=args.limit,
             device=args.device, overwrite=args.overwrite,
             max_frames=args.max_frames, frame_chunk=args.frame_chunk,
-            progress=print)
-        for k in totals:
-            totals[k] += summary[k]
+            progress=lambda m: print(f"[cache] {m}"))
 
-    print(f"[cache] total: {totals}")
-    prov = provenance_block(
-        backbone_id=backbone_id(backbone), view_layout=view_layout.key,
-        splits=splits, **totals)
-    write_json_path = f"{args.out}/cache_provenance.json"
-    write_json(write_json_path, prov)
-    print(f"[cache] provenance -> {write_json_path}")
+    write_run_manifest(reader.cache_dir, run_manifest(
+        NAME, started_at=started, sources=registry.sources,
+        extra={"reader_id": reader.reader_id, "device": args.device,
+               "splits": totals}))
     return 0

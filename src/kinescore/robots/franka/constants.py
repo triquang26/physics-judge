@@ -1,13 +1,4 @@
-"""Franka Panda constants, extracted verbatim from the source ``fk.py``.
-
-Every numeric literal here is byte-identical to
-``judge/fk.py`` (Marionette-ciasc) / ``models/kinematics/fk.py`` (fkjepa) --
-see ``robots/franka/fk.py``'s module docstring for the provenance note. This
-module exists only so :class:`~kinescore.robots.franka.fk.FrankaFK` (the
-ported class body) and :class:`~kinescore.robots.franka.spec.FrankaSpec` (the
-``RobotSpec`` wrapper) can share one definition instead of two copies drifting
-apart.
-"""
+"""Franka Panda constants shared by its FK and its ``RobotSpec``."""
 from __future__ import annotations
 
 __all__ = [
@@ -85,10 +76,10 @@ LINK_FALLBACKS: dict[str, tuple[str, ...]] = {
 # default 1 mm threshold (DEGENERATE_BONE_M) is built to catch: a rigid,
 # motionless arm that merely opens its gripper measures a nonzero
 # "rigidity_residual_mm" purely because bone 5's realised length IS the
-# gripper opening (see legacy_docs/PROVENANCE.md, defect D9).
+# gripper opening.
 #
-# But bones 4 (panda_hand -> panda_leftfinger, 0.0584 m) and 6
-# (panda_rightfinger -> panda_hand_tcp, 0.045 m) carry the same defect for a
+# Bones 4 (panda_hand -> panda_leftfinger, 0.0584 m) and 6
+# (panda_rightfinger -> panda_hand_tcp, 0.045 m) have the same problem for a
 # less obvious reason: panda_leftfinger / panda_rightfinger translate along
 # the *prismatic* finger joints as the gripper opens and closes, so both
 # bones' lengths also change with gripper actuation, not with any actual
