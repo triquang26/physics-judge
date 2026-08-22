@@ -339,7 +339,7 @@ class KeypointTrainer:
 
     def fit(self, *, train_episodes: list[Episode],
             val_episodes: list[Episode] | None = None,
-            progress=None) -> TrainResult:
+            progress=None, on_eval=None) -> TrainResult:
         """Run the loop, mutating ``self.head``.
 
         Parameters
@@ -349,6 +349,11 @@ class KeypointTrainer:
             best-by-val selection and the final state is returned.
         progress:
             ``progress(step, loss)``, or ``None``.
+        on_eval:
+            ``on_eval(step, keypoint_mm)`` each time the validation split is
+            scored, or ``None``. Validation is what says whether a run is
+            working; without this a long run reports only its training loss
+            until it ends.
         """
         cfg = self.cfg
         device = torch.device(cfg.device)
@@ -392,6 +397,8 @@ class KeypointTrainer:
             if (val_episodes is not None and cfg.eval_every
                     and (step % cfg.eval_every == 0 or step == cfg.steps)):
                 mm = self.evaluate(head, val_episodes)["keypoint_mm"]
+                if on_eval:
+                    on_eval(step, mm)
                 if mm < best_val:
                     best_val, best_step = mm, step
                     best_state = copy.deepcopy(head.state_dict())

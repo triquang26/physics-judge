@@ -132,11 +132,35 @@ class TestLoop:
         n = int(target.shape[0])
         assert trainer.read_window(path, n - 2, 10).shape[0] == 2
 
+    def test_validation_is_reported_as_it_is_scored(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        seen = []
+        trainer.fit(
+            train_episodes=trainer.load_episodes(cache_root, annotation_root, "train"),
+            val_episodes=trainer.load_episodes(cache_root, annotation_root, "val"),
+            on_eval=lambda step, mm: seen.append((step, mm)))
+        assert seen, "validation was scored but never reported"
+        assert all(mm > 0 for _step, mm in seen)
+        assert [step for step, _mm in seen] == sorted(step for step, _mm in seen)
+
+    def test_no_validation_split_reports_nothing(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        seen = []
+        trainer.fit(
+            train_episodes=trainer.load_episodes(cache_root, annotation_root, "train"),
+            val_episodes=None,
+            on_eval=lambda step, mm: seen.append((step, mm)))
+        assert seen == []
+
     def test_streamed_evaluate_matches_reading_the_clip_whole(self, tmp_path,
                                                                robot):
         # evaluate() scores an episode in t_max chunks rather than holding it.
         # n_frames is deliberately not a multiple of t_max, so the last chunk
-        # is short and the ragged boundary is exercised.
+        # is short and the ragged boundary is exercised. The two agree up to
+        # float summation order, which the chunking changes, so the tolerance
+        # is relative rather than absolute.
         cache_root, annotation_root = _corpus(tmp_path, robot, n_episodes=1,
                                               n_frames=13)
         trainer = _trainer(robot)
@@ -154,7 +178,7 @@ class TestLoop:
                               for i in range(0, target.shape[0], chunk)])
             e = (pred - target).norm(dim=-1)
             want = float((e ** 2).sum() / e.numel()) ** 0.5 * 1000.0
-        assert abs(got - want) < 1e-6
+        assert got == pytest.approx(want, rel=1e-7)
 
     def test_read_window_is_writable(self, tmp_path, robot):
         # The mapped file is read-only; the copy handed back must not be.

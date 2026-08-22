@@ -92,7 +92,8 @@ def run(args: argparse.Namespace) -> int:
 
     result = trainer.fit(
         train_episodes=train_episodes, val_episodes=val_episodes,
-        progress=lambda step, loss: print(f"[train] step {step} loss {loss:.5f}"))
+        progress=lambda step, loss: print(f"[train] step {step} loss {loss:.5f}"),
+        on_eval=lambda step, mm: print(f"[train] step {step} val {mm:.2f} mm"))
 
     head.load_state_dict(result.best_state_dict)
     out = args.out or str(reader.checkpoint_path)
