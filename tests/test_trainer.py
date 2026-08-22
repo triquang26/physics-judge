@@ -132,6 +132,30 @@ class TestLoop:
         n = int(target.shape[0])
         assert trainer.read_window(path, n - 2, 10).shape[0] == 2
 
+    def test_streamed_evaluate_matches_reading_the_clip_whole(self, tmp_path,
+                                                               robot):
+        # evaluate() scores an episode in t_max chunks rather than holding it.
+        # n_frames is deliberately not a multiple of t_max, so the last chunk
+        # is short and the ragged boundary is exercised.
+        cache_root, annotation_root = _corpus(tmp_path, robot, n_episodes=1,
+                                              n_frames=13)
+        trainer = _trainer(robot)
+        head = trainer.head
+        episodes = trainer.load_episodes(cache_root, annotation_root, "val")
+        got = trainer.evaluate(head, episodes)["keypoint_mm"]
+
+        path, target = episodes[0]
+        chunk = head.t_max
+        assert target.shape[0] % chunk != 0
+        head.eval()
+        with torch.no_grad():
+            whole = trainer.read_window(path, 0, target.shape[0]).float()[None]
+            pred = torch.cat([head(whole[:, i:i + chunk])[0]
+                              for i in range(0, target.shape[0], chunk)])
+            e = (pred - target).norm(dim=-1)
+            want = float((e ** 2).sum() / e.numel()) ** 0.5 * 1000.0
+        assert abs(got - want) < 1e-6
+
     def test_read_window_is_writable(self, tmp_path, robot):
         # The mapped file is read-only; the copy handed back must not be.
         cache_root, annotation_root = _corpus(tmp_path, robot)
