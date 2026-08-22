@@ -12,6 +12,8 @@ import yaml
 
 from kinescore.registry.cells import (
     DEFAULT_ROBOTS_PATH,
+    SCENE_KEY_MODES,
+    TrainSource,
     load_registry,
 )
 from kinescore.registry.views import DEFAULT_VIEWS_PATH, load_views
@@ -92,18 +94,19 @@ class TestViews:
         assert views["mv4_grid_br_blank"].layout(4).panel_count == 4
 
 
-class TestRejections:
-    def _write(self, tmp_path, cells: dict, robots: dict | None = None):
-        cells_path = tmp_path / "cells.yaml"
-        cells_path.write_text(yaml.safe_dump(cells))
-        robots_path = tmp_path / "robots.yaml"
-        robots_path.write_text(yaml.safe_dump(
-            robots or yaml.safe_load(DEFAULT_ROBOTS_PATH.read_text())))
-        return cells_path, robots_path
+def _load_yaml(tmp_path, cells: dict, robots: dict | None = None):
+    """Load a registry from ``cells`` written to ``tmp_path``."""
+    cells_path = tmp_path / "cells.yaml"
+    cells_path.write_text(yaml.safe_dump(cells))
+    robots_path = tmp_path / "robots.yaml"
+    robots_path.write_text(yaml.safe_dump(
+        robots or yaml.safe_load(DEFAULT_ROBOTS_PATH.read_text())))
+    return load_registry(cells_path, robots_path, DEFAULT_VIEWS_PATH)
 
+
+class TestRejections:
     def _load(self, tmp_path, cells, robots=None):
-        cells_path, robots_path = self._write(tmp_path, cells, robots)
-        return load_registry(cells_path, robots_path, DEFAULT_VIEWS_PATH)
+        return _load_yaml(tmp_path, cells, robots)
 
     def test_reader_id_must_match_robot_and_view(self, tmp_path):
         with pytest.raises(ValueError, match="must be <robot>.<view_id>"):
@@ -153,5 +156,40 @@ class TestRejections:
                 "readers": {"franka_panda.sv1": {"robot": "franka_panda",
                                                  "view": "sv1",
                                                  "epochs": 3}},
+                "cells": {},
+            })
+
+
+class TestSceneKeyDeclaration:
+    """``scene_key`` selects how the train/val split groups episodes."""
+
+    def test_default_is_the_id_prefix(self):
+        assert TrainSource(adapter="canonical", root="/x").scene_key == "prefix"
+
+    def test_only_declared_modes_are_accepted(self):
+        with pytest.raises(ValueError, match="scene_key must be one of"):
+            TrainSource(adapter="canonical", root="/x", scene_key="task")
+
+    def test_modes_are_prefix_and_episode(self):
+        assert SCENE_KEY_MODES == {"prefix", "episode"}
+
+    def test_yaml_declares_it(self, tmp_path):
+        registry = _load_yaml(tmp_path, {
+            "readers": {"franka_panda.sv1": {
+                "robot": "franka_panda", "view": "sv1",
+                "train": {"adapter": "canonical", "root": "/x",
+                          "scene_key": "episode"}}},
+            "cells": {},
+        })
+
+        assert registry.readers["franka_panda.sv1"].train.scene_key == "episode"
+
+    def test_yaml_rejects_an_undeclared_mode(self, tmp_path):
+        with pytest.raises(ValueError, match="scene_key must be one of"):
+            _load_yaml(tmp_path, {
+                "readers": {"franka_panda.sv1": {
+                    "robot": "franka_panda", "view": "sv1",
+                    "train": {"adapter": "canonical", "root": "/x",
+                              "scene_key": "task"}}},
                 "cells": {},
             })

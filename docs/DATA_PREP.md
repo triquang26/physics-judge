@@ -31,6 +31,12 @@ $KINESCORE_DATA_ROOT/train/<reader_id>/
     run_manifest.json
 ```
 
+A run rewrites the tree whole: the four split directories are emptied before
+anything is written, so the tree describes that run alone. Re-running with a
+different `--val-ratio`, `--seed` or `scene_key` therefore moves episodes
+cleanly rather than leaving one sitting in both `train` and `val`, and a
+`--limit` run leaves a tree holding only the episodes it read.
+
 Each annotation carries:
 
 ```json
@@ -59,6 +65,22 @@ assigns whole scenes to one side. A task never appears in both `train` and
 `val`, so a validation millimetre number measures generalisation to unseen
 scenes rather than recall of seen ones. Adapters supply the scene key; for
 Ctrl-World-style corpora it is the task directory name.
+
+Whole scenes move together, so the achieved val fraction is only as close to
+`--val-ratio` as the scene sizes allow: the splitter adds whole scenes
+smallest-first and stops before overshooting, but it always places at least
+one scene in `val`. A corpus of a few large scenes therefore lands well past
+the target -- two scenes of 130 episodes split 130/130 whatever ratio is asked
+for.
+
+A source whose episode ids carry no scene structure declares `scene_key:
+episode` in its `train:` block, which makes every episode its own one-episode
+scene. The split is then a plain stratified sample over episodes and hits the
+requested ratio, and it claims no scene disjointness -- the corpus supplies
+nothing to base one on. `fourier_gr1.sv1` uses it: that corpus names episodes
+`<partition>__<index>` over two partitions and its provenance repeats the
+partition as the task, so the id prefix is not a scene. The default,
+`scene_key: prefix`, reads the id up to its last `__`.
 
 ## Adapters
 

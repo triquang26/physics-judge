@@ -17,7 +17,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="target val fraction, split by scene")
     parser.add_argument("--seed", type=int, default=0, help="split seed")
     parser.add_argument("--limit", type=int, default=0,
-                        help="cap episodes read (0 = all)")
+                        help="cap episodes read (0 = all); the tree is "
+                             "rewritten whole, so a capped run leaves only "
+                             "those episodes in it")
     parser.add_argument("--copy", action="store_true",
                         help="copy videos instead of symlinking them")
     add_config_arguments(parser)

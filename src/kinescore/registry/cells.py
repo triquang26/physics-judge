@@ -27,8 +27,11 @@ from kinescore.registry.views import DEFAULT_VIEWS_PATH, ViewSpec, load_views
 
 __all__ = [
     "TrainSource", "ReaderSpec", "CellSpec", "Registry", "load_registry",
-    "DEFAULT_CELLS_PATH", "DEFAULT_ROBOTS_PATH",
+    "DEFAULT_CELLS_PATH", "DEFAULT_ROBOTS_PATH", "SCENE_KEY_MODES",
 ]
+
+#: Accepted :attr:`TrainSource.scene_key` values.
+SCENE_KEY_MODES = frozenset({"prefix", "episode"})
 
 _CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs"
 DEFAULT_CELLS_PATH = _CONFIG_DIR / "cells.yaml"
@@ -70,6 +73,14 @@ class TrainSource:
         canonical order. Empty means every column, in order.
     gripper_column:
         Column holding gripper opening, or ``None``.
+    scene_key:
+        How an episode's scene is derived for the scene-disjoint split.
+        ``"prefix"`` takes the episode id up to its last ``__``, the
+        ``<scene>__<index>`` convention this benchmark's corpora name episodes
+        with. ``"episode"`` makes every episode its own one-episode scene, for
+        a corpus whose ids carry no scene structure to recover; the split is
+        then a plain stratified sample over episodes and claims no scene
+        disjointness.
     """
 
     adapter: str
@@ -77,6 +88,13 @@ class TrainSource:
     joint_field: str = "states"
     joint_columns: tuple[int, ...] = ()
     gripper_column: int | None = None
+    scene_key: str = "prefix"
+
+    def __post_init__(self) -> None:
+        if self.scene_key not in SCENE_KEY_MODES:
+            raise ValueError(
+                f"scene_key must be one of {sorted(SCENE_KEY_MODES)}, got "
+                f"{self.scene_key!r}")
 
 
 @dataclass(frozen=True)
@@ -218,7 +236,7 @@ class Registry:
 
 def _train_from_entry(reader_id: str, entry: dict[str, Any]) -> TrainSource:
     unknown = set(entry) - {"adapter", "root", "joint_field", "joint_columns",
-                            "gripper_column"}
+                            "gripper_column", "scene_key"}
     if unknown:
         raise ValueError(
             f"reader {reader_id!r}: unknown train key(s) {sorted(unknown)}")
@@ -229,6 +247,7 @@ def _train_from_entry(reader_id: str, entry: dict[str, Any]) -> TrainSource:
         joint_columns=tuple(int(i) for i in entry.get("joint_columns", ())),
         gripper_column=(None if entry.get("gripper_column") is None
                         else int(entry["gripper_column"])),
+        scene_key=str(entry.get("scene_key", "prefix")),
     )
 
 

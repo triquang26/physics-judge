@@ -70,6 +70,11 @@ readers:
     train:
       adapter: canonical
       root: ${KINESCORE_DATA_ROOT}/train/fourier_gr1_singleview
+      # This corpus names episodes <partition>__<index>, and its provenance
+      # carries the same two values as its task, so the id prefix groups all
+      # 260 episodes into 2 scenes. Splitting whole scenes off that key sends
+      # half the corpus to val; every episode is its own scene instead.
+      scene_key: episode
 
   franka_panda.mv3_row:
     robot: franka_panda

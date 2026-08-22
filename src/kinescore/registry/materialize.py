@@ -1,7 +1,8 @@
 """Adapter output -> the canonical train tree.
 
 One writer for every corpus. It packs panels to the reader's view, assigns the
-train/val split, writes the annotations, and records what it did::
+train/val split, writes the annotations, and records what it did. A run rewrites
+the tree whole, so what is on disk describes that run and no earlier one::
 
     train/<reader_id>/videos/{train,val}/<episode_id>.mp4
     train/<reader_id>/annotation/{train,val}/<episode_id>.json
@@ -9,7 +10,10 @@ train/val split, writes the annotations, and records what it did::
 
 The split is scene-stratified and disjoint: a task never appears on both sides,
 so a validation number measures generalisation to unseen scenes rather than
-recall of seen ones.
+recall of seen ones. A source whose episode ids carry no scene structure
+declares ``scene_key: episode`` and is split per episode instead, which is a
+plain stratified sample -- it makes no scene-disjointness claim, because the
+corpus gives nothing to make one from.
 """
 from __future__ import annotations
 
@@ -145,7 +149,10 @@ def materialize_train_tree(reader: ReaderSpec, *, val_ratio: float = 0.1,
     val_ratio, seed:
         Scene-stratified split parameters.
     limit:
-        Cap on episodes read (``0`` = all), useful for a smoke run.
+        Cap on episodes read (``0`` = all), useful for a smoke run. The tree is
+        rewritten whole either way, so a capped run leaves a tree holding only
+        the episodes it read -- point it at a throwaway ``KINESCORE_DATA_ROOT``
+        rather than over a corpus that took hours to build.
     copy:
         Copy videos instead of symlinking them.
     progress:
@@ -184,15 +191,24 @@ def materialize_train_tree(reader: ReaderSpec, *, val_ratio: float = 0.1,
     if progress:
         progress(f"{len(episodes)} episodes, {len(report.skipped)} skipped")
 
-    scene = {e.episode_id: e.scene_key for e in episodes}
+    scene = ({e.episode_id: e.episode_id for e in episodes}
+             if reader.train.scene_key == "episode"
+             else {e.episode_id: e.scene_key for e in episodes})
     train_ids, val_ids = stratified_episode_split(
         [e.episode_id for e in episodes], val_ratio=val_ratio, seed=seed,
         scene_key_fn=lambda eid: scene[eid])
     side = dict.fromkeys(train_ids, "train") | dict.fromkeys(val_ids, "val")
 
     for split in ("train", "val"):
-        (tree / "videos" / split).mkdir(parents=True, exist_ok=True)
-        (tree / "annotation" / split).mkdir(parents=True, exist_ok=True)
+        for kind, suffix in (("videos", "*.mp4"), ("annotation", "*.json")):
+            d = tree / kind / split
+            d.mkdir(parents=True, exist_ok=True)
+            # This function is the tree's only writer and rewrites every
+            # episode, so anything already here is from an earlier run. Left in
+            # place, an episode the split now sends to the other side would sit
+            # in both, and training would read its own validation set.
+            for stale in d.glob(suffix):
+                stale.unlink()
 
     for i, episode in enumerate(episodes, 1):
         split = side[episode.episode_id]
