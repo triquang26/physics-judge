@@ -57,6 +57,20 @@ keypoint count against what the robot's forward kinematics actually produces and
 exits if they disagree — a mismatch would train a head whose outputs no detector
 can interpret.
 
+## Memory
+
+Tokens are the large half of the run: a three-panel episode is
+`(T, 1728, 1024)` fp16, a few hundred megabytes, and a split runs to hundreds
+of episodes. They stay on disk. `load_episodes` keeps the cache path and the
+forward-kinematics target — kilobytes per episode — and each sampled window is
+mapped, copied, and released at the point it is used. Resident token memory is
+one batch of windows whatever the split size, so a split is bounded by disk
+rather than by the allocation, and `--limit` is a speed knob rather than a way
+to fit in memory.
+
+`kinescore cache`, by contrast, holds one episode's frames at a time and is
+bounded by `--frame-chunk` on the GPU side.
+
 ## Targets
 
 Supervision is forward kinematics on the logged joint positions. `build_target`
