@@ -47,10 +47,16 @@ def _clips(root: str, limit: int) -> list[str]:
 def run(args: argparse.Namespace) -> int:
     import json
     import os
+    import pathlib
 
     import torch
 
-    from kinescore.cli._shared import load, now, resolve_cell
+    from kinescore.cli._shared import (
+        load,
+        now,
+        resolve_cell,
+        resolve_detectors,
+    )
     from kinescore.core.context import ClipContext
     from kinescore.readers.checkpoint import ReaderExpectation, load_reader
     from kinescore.registry.bench import bench_root, load_bench, select
@@ -63,6 +69,7 @@ def run(args: argparse.Namespace) -> int:
     from kinescore.robots import get_robot
     from kinescore.video.probe import resolve_timebase
     from kinescore.video.reader import load_rgb
+    from kinescore.video.render import read_results, render_results
     from kinescore.violations import ViolationScorer
 
     registry = load(args)
@@ -170,4 +177,10 @@ def run(args: argparse.Namespace) -> int:
     write_run_manifest(out_dir, run_manifest(
         NAME, started_at=started, git=git, sources=registry.sources, extra=summary))
     print(f"[score] {len(clips) - n_failed} scored, {n_failed} failed -> {out_dir}")
+
+    scored_rows = read_results(pathlib.Path(out_dir) / "results.jsonl")
+    if scored_rows:
+        render_results(scored_rows, pathlib.Path(out_dir) / "render",
+                       resolve_detectors(None,
+                                         set(scored_rows[0]["violations"])))
     return 0 if n_failed == 0 else 1
