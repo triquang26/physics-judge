@@ -42,8 +42,9 @@ def _checkpoint(reader) -> dict:
 
 
 def _score(cell) -> dict:
-    """The cell's scored output, and whether it still matches the checkpoint."""
+    """The cell's scored output, named by the checkpoint that produced it."""
     import json
+    import os
 
     path = cell.output_dir / "summary.json"
     if not path.is_file():
@@ -51,6 +52,7 @@ def _score(cell) -> dict:
     s = json.loads(path.read_text())
     return {"n_clips": s.get("n_clips"), "n_failed": s.get("n_failed"),
             "by_role": s.get("n_scored_by_role") or {},
+            "checkpoint": os.path.basename(s.get("checkpoint") or ""),
             "scored_sha256": s.get("checkpoint_sha256")}
 
 
@@ -70,7 +72,7 @@ def _cell_rows(registry, readers: dict[str, dict]) -> list[dict]:
         sc = _score(cell)
         trained = readers.get(cell.reader.reader_id, {}).get("sha256")
         rows.append({"cell": cell_id, "reader": cell.reader.reader_id,
-                     "stale": bool(sc) and sc.get("scored_sha256") != trained,
+                     "off_reader": bool(sc) and sc.get("scored_sha256") != trained,
                      **sc})
     return rows
 
@@ -109,12 +111,13 @@ def run(args: argparse.Namespace) -> int:
     print(_table(readers, ("reader", "tree", "cached", "head", "train_mm",
                            "val_mm", "steps", "status")))
     print("\ncells")
-    print(_table(cells, ("cell", "reader", "n_clips", "n_failed", "stale")))
+    print(_table(cells, ("cell", "checkpoint", "n_clips", "n_failed",
+                         "off_reader")))
 
-    stale = [c["cell"] for c in cells if c["stale"]]
-    if stale:
-        print(f"\nscored against a checkpoint that has since changed: "
-              f"{', '.join(stale)}")
+    off = [c["cell"] for c in cells if c["off_reader"]]
+    if off:
+        print(f"\nscored with a checkpoint that is not the reader's own: "
+              f"{', '.join(off)}")
     if args.out:
         with open(args.out, "w") as f:
             json.dump({"readers": readers, "cells": cells}, f, indent=2)

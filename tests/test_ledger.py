@@ -47,13 +47,14 @@ class TestTicks:
         assert rows[0]["cached"] == 5
 
 
-class TestStaleness:
+class TestScoreProvenance:
     def _scored(self, tmp_path, sha):
         reader = _Reader(tmp_path)
         cell = _Cell(tmp_path, reader)
         cell.output_dir.mkdir(parents=True)
         (cell.output_dir / "summary.json").write_text(json.dumps(
             {"n_clips": 34, "n_failed": 0, "n_scored_by_role": {"dense": 34},
+             "checkpoint": "/ckpt/robot.diff.pt",
              "checkpoint_sha256": sha}))
         return reader, cell
 
@@ -62,18 +63,24 @@ class TestStaleness:
         return cmd_ledger._cell_rows(
             registry, {reader.reader_id: {"sha256": trained_sha}})
 
-    def test_score_matching_the_checkpoint_is_not_stale(self, tmp_path):
+    def test_a_score_from_the_readers_own_checkpoint_is_not_flagged(
+            self, tmp_path):
         reader, cell = self._scored(tmp_path, "abc")
-        assert self._rows(reader, cell, "abc")[0]["stale"] is False
+        assert self._rows(reader, cell, "abc")[0]["off_reader"] is False
 
-    def test_score_from_a_replaced_checkpoint_is_stale(self, tmp_path):
+    def test_a_score_from_another_checkpoint_is_flagged(self, tmp_path):
         reader, cell = self._scored(tmp_path, "abc")
-        assert self._rows(reader, cell, "def")[0]["stale"] is True
+        assert self._rows(reader, cell, "def")[0]["off_reader"] is True
 
-    def test_an_unscored_cell_is_not_reported_stale(self, tmp_path):
+    def test_an_unscored_cell_is_not_flagged(self, tmp_path):
         reader = _Reader(tmp_path)
         cell = _Cell(tmp_path, reader)
-        assert self._rows(reader, cell, "abc")[0]["stale"] is False
+        assert self._rows(reader, cell, "abc")[0]["off_reader"] is False
+
+    def test_the_scoring_checkpoint_is_named(self, tmp_path):
+        reader, cell = self._scored(tmp_path, "abc")
+        assert self._rows(reader, cell, "abc")[0]["checkpoint"] == \
+            "robot.diff.pt"
 
 
 class TestTable:
