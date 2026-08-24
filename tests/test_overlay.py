@@ -42,6 +42,10 @@ class TestOrder:
         assert senses["self_collision"] is False
         assert all(v for k, v in senses.items() if k != "self_collision")
 
+    def test_a_name_list_restricts_and_orders_the_rows(self):
+        assert overlay.detector_order(["jerk", "rigidity"]) == (
+            ("jerk", True), ("rigidity", True))
+
 
 class TestMeasure:
     def test_a_large_reading_stays_inside_its_column(self):
@@ -67,6 +71,18 @@ class TestRenderClip:
         rows = len(overlay.detector_order())
         assert out.shape == (4, 32 + overlay._HEADER_H + overlay._ROW_H * rows,
                              640, 3)
+
+    def test_only_the_named_detectors_get_a_row(self):
+        frames = np.zeros((4, 32, 640, 3), dtype=np.uint8)
+        out = overlay.render_clip(frames, _row(), ["rigidity", "jerk"])
+        assert out.shape[1] == 32 + overlay._HEADER_H + overlay._ROW_H * 2
+
+    def test_a_detector_left_out_cannot_outline_a_frame(self):
+        flagged = _detector([1.0, 99.0, 1.0, 1.0], 10.0, [[1, 1]])
+        frames = np.zeros((4, 16, 320, 3), dtype=np.uint8)
+        out = overlay.render_clip(frames, _row(teleport=flagged),
+                                  ["rigidity", "jerk"])
+        assert not out[1, overlay._HEADER_H, 160].any()
 
     def test_the_source_frame_is_carried_through_unchanged(self):
         frames = np.random.randint(0, 255, (2, 16, 320, 3), dtype=np.uint8)

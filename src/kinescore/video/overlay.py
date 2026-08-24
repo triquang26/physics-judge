@@ -12,15 +12,19 @@ import numpy as np
 __all__ = ["detector_order", "render_clip"]
 
 
-def detector_order() -> tuple[tuple[str, bool], ...]:
+def detector_order(names=None) -> tuple[tuple[str, bool], ...]:
     """Detector rows top to bottom, each with its ``higher_is_worse`` sense.
 
-    Taken from the scorer's own list, so a detector added there appears here
-    with the direction it is actually thresholded in.
+    Senses come from the scorer's own list, so a detector added there is drawn
+    in the direction it is actually thresholded in. ``names`` restricts and
+    orders the rows; the default is every detector.
     """
     from kinescore.violations import DETECTORS
 
-    return tuple((d.name, d.higher_is_worse) for d in DETECTORS)
+    sense = {d.name: d.higher_is_worse for d in DETECTORS}
+    if names is None:
+        return tuple(sense.items())
+    return tuple((n, sense[n]) for n in names)
 
 _HEADER_H = 26
 _ROW_H = 26
@@ -105,18 +109,20 @@ def _row(canvas, y, name, higher_is_worse, detector, frame, width):
           _FLAG if flags[i] else _DIM, 0.38)
 
 
-def render_clip(frames: np.ndarray, row: dict) -> np.ndarray:
+def render_clip(frames: np.ndarray, row: dict, names=None) -> np.ndarray:
     """Compose ``(N,H,W,3)`` RGB frames with ``row``'s timeline underneath.
 
-    Returns ``(N, H + header + one row per detector, W, 3)`` RGB. Frames whose
-    index falls in any flagged interval are outlined, so a segment is visible
-    in the picture as well as on the bars.
+    ``names`` selects which detectors get a row and decide the outline; the
+    others stay in ``row`` untouched. Returns ``(N, H + header + one row per
+    drawn detector, W, 3)`` RGB. Frames whose index falls in any flagged
+    interval are outlined, so a segment is visible in the picture as well as
+    on the bars.
     """
     import cv2
 
     violations = row["violations"]
     n, h, w, _ = frames.shape
-    order = detector_order()
+    order = detector_order(names)
     height = _HEADER_H + h + _ROW_H * len(order)
     out = np.empty((n, height, w, 3), dtype=np.uint8)
 

@@ -11,9 +11,9 @@ from kinescore.violations.detectors import (
     SelfCollisionDetector,
     TeleportDetector,
 )
-from kinescore.violations.scorer import DETECTORS, ViolationScorer
+from kinescore.violations.scorer import DETECTORS, HEADLINE, ViolationScorer
 
 __all__ = [
     "Detector", "RigidityDetector", "JerkDetector", "TeleportDetector",
-    "JointLimitDetector", "SelfCollisionDetector", "ViolationScorer", "DETECTORS",
+    "JointLimitDetector", "SelfCollisionDetector", "ViolationScorer", "DETECTORS", "HEADLINE",
 ]

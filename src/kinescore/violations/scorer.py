@@ -21,7 +21,7 @@ from kinescore.violations.detectors import (
     TeleportDetector,
 )
 
-__all__ = ["DETECTORS", "ViolationScorer"]
+__all__ = ["DETECTORS", "HEADLINE", "ViolationScorer"]
 
 #: Per-detector calibration floor (same units as the detector), keyed by
 #: ``Detector.name``. A near-zero GT spread on rigidity/joint_limit otherwise
@@ -50,6 +50,11 @@ def _default_detectors() -> list[Detector]:
 #: calibrating one scorer never mutates another's thresholds through a
 #: shared ``Detector`` object.
 DETECTORS: list[Detector] = _default_detectors()
+
+#: The detectors a benchmark number is read off. Every detector in
+#: ``DETECTORS`` is still computed and written to ``results.jsonl``; this is
+#: what ``report`` and ``render`` show unless asked for more.
+HEADLINE: tuple[str, ...] = ("rigidity", "jerk")
 
 
 class ViolationScorer:
