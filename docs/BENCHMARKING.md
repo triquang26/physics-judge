@@ -40,6 +40,71 @@ into every scored record, and are what `kinescore report --by` groups on.
 A cell inherits its reader's `status`: a blocked reader blocks every cell that
 names it, and `--list` shows why.
 
+## Which reader judges which cell
+
+Every cell resolves to one reader, and that reader is fitted on one corpus.
+`kinescore score --list` prints this live; the assignment itself is
+`configs/cells.yaml`.
+
+| cell | reader | corpus | clips |
+|---|---|---|---|
+| `bimanual.mv4_row.ctrlworld_4view_grid` | `aloha_bimanual.bimanual_mv.mv4_row` | `bimanual_mv` | 34 |
+| `bimanual.mv4_grid.dreamgen` | `aloha_bimanual.bimanual_mv.mv4_grid` | `bimanual_mv` | 34 |
+| `bimanual.sv1_16x9.dreamgen` | `aloha_bimanual.bimanual_sv.sv1_16x9` | `bimanual_sv` | 34 |
+| `bimanual.sv1_4x3.dreamdojo` | `aloha_bimanual.bimanual_sv.sv1_4x3` | `bimanual_sv` | 34 |
+| `humanoid.mv4_row.ctrlworld_4view_grid` | `airbot_mmk2.humanoid_mv.mv4_row` | `humanoid_mv` | 34 |
+| `humanoid.mv4_grid.dreamgen` | `airbot_mmk2.humanoid_mv.mv4_grid` | `humanoid_mv` | 34 |
+| `humanoid.sv1_16x9.dreamgen` | `fourier_gr1.humanoid_sv.sv1_16x9` | `humanoid_sv` | 34 |
+| `humanoid.sv1_4x3.dreamdojo` | `fourier_gr1.humanoid_sv.sv1_4x3` | `humanoid_sv` | 34 |
+| `single_arm.mv3_row.ctrlworld` | `franka_panda.single_arm_mv.mv3_row` | `single_arm_mv` | 32 |
+| `single_arm.mv4_grid_br_blank.dreamgen` | `franka_panda.single_arm_mv.mv4_grid_br_blank` | `single_arm_mv` | 32 |
+| `single_arm.sv1_4x3.dreamgen` | `franka_panda.single_arm_mv.sv1_4x3` | `single_arm_mv` | 32 |
+| `single_arm.sv1_4x3.dreamdojo` | `franka_panda.single_arm_mv.sv1_4x3` | `single_arm_mv` | 32 |
+
+The twelve cells partition all 400 bench clips; every clip is judged exactly
+once, by the reader trained on the same robot and view packing.
+
+## The augment set is the negative control
+
+55 of the 400 clips are real video deliberately corrupted to a known severity.
+They exist to answer a question the generated clips cannot: **is the detector
+alive?** A violation rate of zero on a generator means nothing until the same
+detector fires on motion that is known to be wrong.
+
+| role | n | `aug_tag` |
+|---|---|---|
+| `strong_augment` | 23 | `object_relocation` 13, `task_swap` 10 |
+| `weak_augment` | 32 | `combo` 8, `edit_only` 8, `v04_purple` 4, `v05_orange` 3, `v06_pink` 3, `prompt_only` 2, `v00_red` / `v03_yellow` / `v07_cyan` / `v09_black` 1 each |
+
+`strong_augment` moves the scene's semantics — the task is swapped or an object
+is relocated — and every such clip in the source is included. `weak_augment` is
+a small random sample of milder edits: colour variants (`v*`), prompt-only and
+edit-only changes, and their combination.
+
+Read them as a floor, not a ceiling: a detector that misses `strong_augment` is
+broken, but one that catches it is only shown to catch corruption of that kind
+and that size.
+
+### Coverage is uneven, and most cells have none
+
+The 23 `strong_augment` clips sit in three cells:
+
+| cell | `strong_augment` | `weak_augment` |
+|---|---|---|
+| `bimanual.sv1_16x9.dreamgen` | 16 | 4 |
+| `single_arm.mv4_grid_br_blank.dreamgen` | 4 | 4 |
+| `bimanual.mv4_grid.dreamgen` | 3 | 6 |
+
+The other nine cells have none, and five of those (`bimanual.sv1_4x3.dreamdojo`,
+`humanoid.mv4_grid.dreamgen`, `humanoid.sv1_16x9.dreamgen`,
+`humanoid.sv1_4x3.dreamdojo`, `single_arm.sv1_4x3.dreamdojo`) carry no augment
+clips at all.
+
+For those cells a violation rate stands on its own with nothing to calibrate it
+against, so report it as a measurement of the generator and not as evidence that
+the detector works. Extending coverage means sampling more `augment/` clips into
+`bench/manifest.json` for the cells that lack them.
+
 ## Order of operations
 
 1. Resolve the cell; refuse if it or its reader is blocked.
