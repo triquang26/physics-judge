@@ -9,17 +9,25 @@ from kinescore.video import overlay
 pytestmark = pytest.mark.unit
 
 
-def _detector(per_frame, threshold, intervals=()):
-    return {"threshold": threshold, "per_frame": list(per_frame),
-            "intervals": [list(i) for i in intervals]}
+def _detector(per_frame, threshold):
+    return {"threshold": threshold, "per_frame": list(per_frame)}
 
 
-def _row(**over):
-    base = {name: _detector([1.0] * 4, 10.0) for name, _ in
-            overlay.detector_order()}
+def _row(length=16, **over):
+    """A clip no detector faults, plus whatever ``over`` replaces.
+
+    A passing value differs by direction: below the threshold for a
+    higher-is-worse detector, above it for one thresholded from below.
+    """
+    from kinescore.violations import segments
+
+    base = {name: _detector([1.0 if higher_is_worse else 100.0] * 4, 10.0)
+            for name, higher_is_worse in overlay.detector_order()}
     base.update(over)
+    names = [n for n, _ in overlay.detector_order()]
     return {"id": "00001", "role": "dense", "aug_tag": None, "task": "t",
-            "violations": base}
+            "violations": base,
+            "segments": segments.report(base, names, length=length)}
 
 
 class TestSeverity:
@@ -55,13 +63,21 @@ class TestMeasure:
         assert overlay._measure(76.54) == "77"
 
 
-class TestFlaggedMask:
-    def test_interval_endpoints_are_inclusive(self):
-        mask = overlay._flagged_mask(np.zeros(6), [[1, 3]])
+class TestViolatedMask:
+    def test_a_violated_segment_covers_its_whole_frame_range(self):
+        mask = overlay._violated_mask(
+            [{"start": 1, "end": 3, "violated": True}], 6)
         assert list(mask) == [False, True, True, True, False, False]
 
-    def test_no_interval_flags_nothing(self):
-        assert not overlay._flagged_mask(np.zeros(4), []).any()
+    def test_a_segment_that_passed_marks_nothing(self):
+        mask = overlay._violated_mask(
+            [{"start": 0, "end": 3, "violated": False}], 4)
+        assert not mask.any()
+
+    def test_verdicts_are_read_off_the_row(self):
+        row = _row(length=2, rigidity=_detector([1.0, 1.0, 99.0, 99.0], 10.0))
+        got = overlay._verdicts(row, "rigidity")
+        assert [v["violated"] for v in got] == [False, True]
 
 
 class TestRenderClip:
@@ -78,11 +94,11 @@ class TestRenderClip:
         assert out.shape[1] == 32 + overlay._HEADER_H + overlay._ROW_H * 2
 
     def test_a_detector_left_out_cannot_outline_a_frame(self):
-        flagged = _detector([1.0, 99.0, 1.0, 1.0], 10.0, [[1, 1]])
+        violating = _detector([1.0, 1.0, 99.0, 99.0], 10.0)
         frames = np.zeros((4, 16, 320, 3), dtype=np.uint8)
-        out = overlay.render_clip(frames, _row(teleport=flagged),
+        out = overlay.render_clip(frames, _row(length=2, teleport=violating),
                                   ["rigidity", "jerk"])
-        assert not out[1, overlay._HEADER_H, 160].any()
+        assert not out[2, overlay._HEADER_H, 160].any()
 
     def test_the_source_frame_is_carried_through_unchanged(self):
         frames = np.random.randint(0, 255, (2, 16, 320, 3), dtype=np.uint8)
@@ -90,10 +106,28 @@ class TestRenderClip:
         top = overlay._HEADER_H
         assert np.array_equal(out[0, top:top + 16], frames[0])
 
-    def test_a_flagged_frame_is_outlined_and_a_clean_one_is_not(self):
-        rigid = _detector([1.0, 99.0, 1.0, 1.0], 10.0, [[1, 1]])
+    def test_a_violated_segment_outlines_its_frames_and_a_clean_one_does_not(self):
+        rigid = _detector([1.0, 1.0, 99.0, 99.0], 10.0)
         out = overlay.render_clip(
-            np.zeros((4, 16, 320, 3), dtype=np.uint8), _row(rigidity=rigid))
+            np.zeros((4, 16, 320, 3), dtype=np.uint8),
+            _row(length=2, rigidity=rigid))
         top = overlay._HEADER_H
-        assert out[1, top, 160].any()
+        assert out[2, top, 160].any()
         assert not out[0, top, 160].any()
+
+
+class TestTrace:
+    def test_a_clip_names_the_path_it_came_from(self):
+        row = _row()
+        row["source_path"] = "augment/bimanual/output/ep_000/pred.mp4"
+        assert overlay._trace(row, 1280) == row["source_path"]
+
+    def test_an_over_long_path_keeps_its_tail(self):
+        row = _row()
+        row["source_path"] = "a/" * 200 + "episode_000123/pred.mp4"
+        out = overlay._trace(row, 640)
+        assert out.startswith("...")
+        assert out.endswith("episode_000123/pred.mp4")
+
+    def test_a_clip_with_no_source_falls_back_to_its_bench_id(self):
+        assert overlay._trace(_row(), 1280) == "clips/00001.mp4"

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ["is_flagged", "read_results", "render_results"]
+__all__ = ["is_flagged", "read_results", "render_path", "render_results"]
 
 
 def read_results(results: Path) -> list[dict]:
@@ -25,9 +25,25 @@ def read_results(results: Path) -> list[dict]:
 
 
 def is_flagged(row: dict, names) -> bool:
-    """Whether any of ``names`` flagged an interval in ``row``."""
-    violations = row.get("violations") or {}
-    return any(violations[n].get("intervals") for n in names)
+    """Whether any of ``names`` judged a segment of ``row`` a violation."""
+    return any(v["violated"]
+               for seg in row.get("segments") or []
+               for n, v in (seg.get("detectors") or {}).items() if n in names)
+
+
+def render_path(out_dir: Path, row: dict) -> Path:
+    """Where ``row``'s rendered clip goes, under ``out_dir``.
+
+    The bench flattens every clip to ``clips/<id>.mp4``, which loses which tree
+    it came from. Rendering mirrors ``source_path`` instead, so a drawn clip
+    sits at the same place under ``out_dir`` as its source does in the source
+    repo and needs no lookup to trace. Clips scored through ``--videos`` carry
+    no ``source_path``; those fall back to ``<id>_<role>.mp4``.
+    """
+    source = (row.get("source_path") or "").strip("/")
+    if not source:
+        return out_dir / f"{row['id']}_{row.get('role') or 'clip'}.mp4"
+    return out_dir / Path(source).with_suffix(".mp4")
 
 
 def render_results(rows: list[dict], out_dir: Path, names, *, fps: float = 5.0,
@@ -48,11 +64,12 @@ def render_results(rows: list[dict], out_dir: Path, names, *, fps: float = 5.0,
 
     for n, row in enumerate(rows, 1):
         drawn = render_clip(np.asarray(iio.imread(row["path"])), row, names)
-        path = out_dir / f"{row['id']}_{row['role']}.mp4"
+        path = render_path(out_dir, row)
+        path.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(path, drawn, fps=fps, codec="libx264", macro_block_size=1)
         if reel:
             joined.append(drawn)
-        log(f"[render] {n}/{len(rows)} {path.name} "
+        log(f"[render] {n}/{len(rows)} {path.relative_to(out_dir)} "
             f"{'flagged' if is_flagged(row, names) else 'clean'}")
 
     if joined:

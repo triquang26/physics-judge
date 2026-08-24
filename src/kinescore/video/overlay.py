@@ -26,7 +26,7 @@ def detector_order(names=None) -> tuple[tuple[str, bool], ...]:
         return tuple(sense.items())
     return tuple((n, sense[n]) for n in names)
 
-_HEADER_H = 26
+_HEADER_H = 58
 _ROW_H = 26
 _LABEL_W = 150
 _VALUE_W = 128
@@ -63,12 +63,59 @@ def _ramp(ratio: float) -> tuple[int, int, int]:
             int(_OK[2] + (232 - _OK[2]) * a))
 
 
-def _flagged_mask(series: np.ndarray, intervals: list) -> np.ndarray:
-    """Frames inside a flagged interval. Endpoints are inclusive."""
-    mask = np.zeros(len(series), dtype=bool)
-    for start, end in intervals:
-        mask[int(start):int(end) + 1] = True
+def _verdicts(row: dict, name: str) -> list[dict]:
+    """``name``'s verdict in each segment of ``row``, in time order."""
+    out = []
+    for seg in row.get("segments") or []:
+        found = (seg.get("detectors") or {}).get(name)
+        if found is not None:
+            out.append({"start": seg["start"], "end": seg["end"], **found})
+    return out
+
+
+def _violated_mask(verdicts: list[dict], n_frames: int) -> np.ndarray:
+    """Frames sitting inside a segment this detector judged a violation."""
+    mask = np.zeros(n_frames, dtype=bool)
+    for v in verdicts:
+        if v["violated"]:
+            mask[v["start"]:v["end"] + 1] = True
     return mask
+
+
+def _trace(row: dict, width: int, scale: float = 0.40) -> str:
+    """Where this clip came from, kept to what one header line can hold.
+
+    The reel concatenates clips, so each has to name itself or a viewer cannot
+    tell which one they are looking at. ``source_path`` is that name: it is the
+    clip's place in the dataset it was drawn from, and the tail of that path
+    identifies the episode, so an over-long path loses its head, not its tail.
+    """
+    source = row.get("source_path") or ""
+    if not source:
+        return f"clips/{row['id']}.mp4"
+    fits = max(16, int(width / (scale * 22.0)))
+    return source if len(source) <= fits else "..." + source[-(fits - 3):]
+
+
+def _clip_summary(by_detector: dict, order) -> str:
+    """How many segments each detector judged a violation, and its worst one.
+
+    The bars say which segments; this says how many, in one line, without the
+    reader having to scrub. Severity is dimensionless (1.0 = at the threshold),
+    so detectors in different units read side by side.
+    """
+    parts = []
+    for name, higher_is_worse in order:
+        verdicts = by_detector.get(name) or []
+        if not verdicts:
+            parts.append(f"{name} -")
+            continue
+        worst = max(_severity(v["value"], v["threshold"], higher_is_worse)
+                    for v in verdicts)
+        hit = sum(1 for v in verdicts if v["violated"])
+        parts.append(f"{name} {verdicts[0]['reduce']} {hit}/{len(verdicts)} seg"
+                     f"  worst {worst:.2f}x")
+    return "   ".join(parts)
 
 
 def _measure(value: float) -> str:
@@ -76,61 +123,64 @@ def _measure(value: float) -> str:
     return f"{value:.0f}" if abs(value) < 1e5 else f"{value:.1e}"
 
 
-def _row(canvas, y, name, higher_is_worse, detector, frame, width):
-    """Draw one detector's full timeline, with the playhead at ``frame``."""
+def _row(canvas, y, name, higher_is_worse, verdicts, n_frames, frame, width):
+    """Draw one detector's segments, with the playhead at ``frame``.
+
+    One cell per segment, not per frame: the cell holds the reduced value the
+    verdict was actually taken on, so what is drawn is what was judged.
+    """
     import cv2
 
-    series = np.asarray(detector["per_frame"], dtype=float)
-    thr = float(detector["threshold"])
-    flags = _flagged_mask(series, detector.get("intervals") or [])
     bar_x, bar_w = _LABEL_W, width - _LABEL_W - _VALUE_W
     top, bot = y + 5, y + _ROW_H - 7
+    any_violated = any(v["violated"] for v in verdicts)
+    _text(canvas, name, (8, y + _ROW_H - 9), _FLAG if any_violated else _DIM)
 
-    _text(canvas, name, (8, y + _ROW_H - 9),
-          _FLAG if flags.any() else _DIM)
-    for i, value in enumerate(series):
-        x0 = bar_x + round(i * bar_w / len(series))
-        x1 = bar_x + round((i + 1) * bar_w / len(series))
-        colour = (_FLAG if flags[i]
-                  else _ramp(_severity(value, thr, higher_is_worse)))
-        cv2.rectangle(canvas, (x0, top), (x1 - 1, bot), colour, -1)
+    here = verdicts[0] if verdicts else None
+    for v in verdicts:
+        x0 = bar_x + round(v["start"] * bar_w / n_frames)
+        x1 = bar_x + round((v["end"] + 1) * bar_w / n_frames)
+        colour = (_FLAG if v["violated"]
+                  else _ramp(_severity(v["value"], v["threshold"],
+                                       higher_is_worse)))
+        cv2.rectangle(canvas, (x0 + 1, top), (x1 - 2, bot), colour, -1)
+        if v["start"] <= frame <= v["end"]:
+            here = v
+            cv2.rectangle(canvas, (x0 + 1, top), (x1 - 2, bot), _FG, 1)
 
-    for start, end in detector.get("intervals") or []:
-        x0 = bar_x + round(int(start) * bar_w / len(series))
-        x1 = bar_x + round((int(end) + 1) * bar_w / len(series))
-        cv2.line(canvas, (x0, bot + 2), (x1 - 1, bot + 2), _FG, 1)
-
-    px = bar_x + round((frame + 0.5) * bar_w / len(series))
+    px = bar_x + round((frame + 0.5) * bar_w / n_frames)
     cv2.line(canvas, (px, top - 3), (px, bot + 3), _FG, 1)
 
-    i = min(frame, len(series) - 1)
-    _text(canvas, f"{_measure(series[i])}/{_measure(thr)}",
-          (bar_x + bar_w + 8, y + _ROW_H - 9),
-          _FLAG if flags[i] else _DIM, 0.38)
+    if here is not None:
+        _text(canvas, f"{here['reduce'][:3]} {_measure(here['value'])}"
+                      f"/{_measure(here['threshold'])}",
+              (bar_x + bar_w + 8, y + _ROW_H - 9),
+              _FLAG if here["violated"] else _DIM, 0.38)
 
 
 def render_clip(frames: np.ndarray, row: dict, names=None) -> np.ndarray:
     """Compose ``(N,H,W,3)`` RGB frames with ``row``'s timeline underneath.
 
     ``names`` selects which detectors get a row and decide the outline; the
-    others stay in ``row`` untouched. Returns ``(N, H + header + one row per
+    others stay in ``row`` untouched. Bars are drawn from ``row["segments"]``,
+    the same verdicts the tables report. Returns ``(N, H + header + one row per
     drawn detector, W, 3)`` RGB. Frames whose index falls in any flagged
     interval are outlined, so a segment is visible in the picture as well as
     on the bars.
     """
     import cv2
 
-    violations = row["violations"]
     n, h, w, _ = frames.shape
     order = detector_order(names)
     height = _HEADER_H + h + _ROW_H * len(order)
     out = np.empty((n, height, w, 3), dtype=np.uint8)
 
-    flagged = {name: _flagged_mask(
-        np.asarray(violations[name]["per_frame"], dtype=float),
-        violations[name].get("intervals") or []) for name, _ in order}
+    verdicts = {name: _verdicts(row, name) for name, _ in order}
+    flagged = {name: _violated_mask(v, n) for name, v in verdicts.items()}
     title = (f"{row['id']}  {row['role']}  {row.get('aug_tag') or '-'}  "
              f"{row['task']}")
+    summary = _clip_summary(verdicts, order)
+    trace = _trace(row, w)
 
     for i in range(n):
         canvas = np.full((height, w, 3), _BG, dtype=np.uint8)
@@ -140,12 +190,14 @@ def render_clip(frames: np.ndarray, row: dict, names=None) -> np.ndarray:
         if hits:
             cv2.rectangle(canvas, (0, _HEADER_H), (w - 1, _HEADER_H + h - 1),
                           _FLAG, 2)
-        _text(canvas, title, (8, 18), _FG)
+        _text(canvas, title, (8, 17), _FG)
         _text(canvas, f"f {i + 1:>3}/{n}   {' '.join(hits) or 'clean'}",
-              (w - 470, 18), _FLAG if hits else _OK)
+              (w - 470, 17), _FLAG if hits else _OK)
+        _text(canvas, trace, (8, 34), _FG, 0.40)
+        _text(canvas, summary, (8, 50), _DIM, 0.40)
 
         for k, (name, higher_is_worse) in enumerate(order):
             _row(canvas, _HEADER_H + h + k * _ROW_H, name, higher_is_worse,
-                 violations[name], i, w)
+                 verdicts[name], n, i, w)
         out[i] = canvas[:, :, ::-1]
     return out

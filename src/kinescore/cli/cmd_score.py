@@ -70,7 +70,8 @@ def run(args: argparse.Namespace) -> int:
     from kinescore.video.probe import resolve_timebase
     from kinescore.video.reader import load_rgb
     from kinescore.video.render import read_results, render_results
-    from kinescore.violations import ViolationScorer
+    from kinescore.violations import ViolationScorer, segments
+    from kinescore.violations.table import write_table
 
     registry = load(args)
     if args.list or not args.cell:
@@ -137,6 +138,7 @@ def run(args: argparse.Namespace) -> int:
             f"{cell.select}) -- run `kinescore pull --what bench`, or point "
             f"--videos at a directory of *.mp4")
 
+    all_detectors = [d.name for d in scorer.detectors]
     out_dir = args.out or str(cell.output_dir)
     os.makedirs(out_dir, exist_ok=True)
     results_path = os.path.join(out_dir, "results.jsonl")
@@ -153,6 +155,8 @@ def run(args: argparse.Namespace) -> int:
                 f.write(json.dumps(record) + "\n")
                 print(f"[score] failed  {path}: {exc}")
                 continue
+            record["segments"] = segments.report(
+                record["violations"], all_detectors)
             role = coords.get("role", "")
             by_role[role] = by_role.get(role, 0) + 1
             f.write(json.dumps(record) + "\n")
@@ -180,7 +184,9 @@ def run(args: argparse.Namespace) -> int:
 
     scored_rows = read_results(pathlib.Path(out_dir) / "results.jsonl")
     if scored_rows:
-        render_results(scored_rows, pathlib.Path(out_dir) / "render",
-                       resolve_detectors(None,
-                                         set(scored_rows[0]["violations"])))
+        names = resolve_detectors(None, set(scored_rows[0]["violations"]))
+        table = write_table(scored_rows, pathlib.Path(out_dir) / "metrics.csv",
+                            names)
+        print(f"[score] {table}")
+        render_results(scored_rows, pathlib.Path(out_dir) / "render", names)
     return 0 if n_failed == 0 else 1

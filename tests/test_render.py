@@ -19,15 +19,20 @@ def _clip(tmp_path, name, n=3):
     return str(path), n
 
 
-def _row(tmp_path, clip_id, role="dense", intervals=(), n=3):
+_ALL = ("rigidity", "jerk", "teleport", "joint_limit", "self_collision")
+
+
+def _row(tmp_path, clip_id, role="dense", violating=(), n=3):
+    from kinescore.violations import segments
+
     path, n = _clip(tmp_path, clip_id, n)
-    detectors = {name: {"threshold": 10.0, "per_frame": [1.0] * n,
-                        "intervals": []}
-                 for name in ("rigidity", "jerk", "teleport", "joint_limit",
-                              "self_collision")}
-    detectors["rigidity"]["intervals"] = [list(i) for i in intervals]
+    detectors = {name: {"threshold": 10.0, "per_frame": [1.0] * n}
+                 for name in _ALL}
+    for name in violating:
+        detectors[name]["per_frame"] = [99.0] * n
     return {"path": path, "id": clip_id, "role": role, "aug_tag": None,
-            "task": "t", "violations": detectors}
+            "task": "t", "violations": detectors,
+            "segments": segments.report(detectors, _ALL)}
 
 
 class TestReadResults:
@@ -49,12 +54,11 @@ class TestReadResults:
 
 class TestIsFlagged:
     def test_a_detector_outside_the_reported_set_does_not_count(self, tmp_path):
-        row = _row(tmp_path, "a")
-        row["violations"]["teleport"]["intervals"] = [[0, 1]]
+        row = _row(tmp_path, "a", violating=["teleport"])
         assert render.is_flagged(row, ["rigidity", "jerk"]) is False
 
     def test_a_reported_detector_counts(self, tmp_path):
-        row = _row(tmp_path, "a", intervals=[[0, 1]])
+        row = _row(tmp_path, "a", violating=["rigidity"])
         assert render.is_flagged(row, ["rigidity", "jerk"]) is True
 
 

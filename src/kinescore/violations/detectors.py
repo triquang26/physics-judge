@@ -79,6 +79,12 @@ class Detector:
     #: (most detectors). ``False``: flagged *below* -- e.g. self-collision's
     #: minimum inter-keypoint distance, where smaller is worse.
     higher_is_worse: bool = True
+    #: How a segment's frames reduce to the one number judged against the
+    #: threshold. ``"worst"`` takes the extreme in this detector's own
+    #: direction -- a single bad frame is the violation. ``"median"`` takes the
+    #: typical frame instead, so a violation means the segment was bad
+    #: throughout, not once.
+    segment_reduce: str = "worst"
 
     def __init__(self) -> None:
         self.threshold: float | None = None
@@ -192,6 +198,9 @@ class RigidityDetector(Detector):
     """
 
     name = "rigidity"
+    #: A rigid link cannot stretch, so a lone stretched frame is measurement
+    #: noise; a segment whose typical frame is stretched is not.
+    segment_reduce = "median"
     units = "mm"
 
     def __init__(self, rigid_idx: Sequence[int] | None = None) -> None:

@@ -9,7 +9,8 @@ from kinescore.paths import env_path
 
 __all__ = ["BenchItem", "bench_root", "load_bench", "select"]
 
-_FIELDS = ("embodiment", "view", "model", "split", "task", "role", "aug_tag")
+_FIELDS = ("embodiment", "view", "model", "split", "task", "role", "aug_tag",
+           "source_path")
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,11 @@ class BenchItem:
     role: str
     task: str
     aug_tag: str
+    #: Where the clip sits in the dataset it was drawn from, e.g.
+    #: ``augment/bimanual/output/multiview/.../pred_all_views.mp4``. The bench
+    #: flattens every clip to ``clips/<id>.mp4``, so this is what ties a scored
+    #: row back to the tree it was drawn from.
+    source_path: str
 
     def coords(self) -> dict[str, str]:
         return {"id": self.id, "method": self.method,
@@ -59,6 +65,7 @@ def load_bench(root: Path | None = None) -> list[BenchItem]:
             role=str(raw.get("role", "")),
             task=str(raw.get("task", "")),
             aug_tag=str(raw.get("aug_tag") or ""),
+            source_path=str(raw.get("source_path") or ""),
         ))
     return items
 
