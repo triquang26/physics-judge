@@ -204,6 +204,7 @@ The default tier needs no GPU, no downloads and no trained weights.
 
 | | |
 |---|---|
+| [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md) | standing the pipeline up on a new machine: what to carry, what regenerates |
 | [`docs/DATA_PREP.md`](docs/DATA_PREP.md) | sources, corpus layout, packing, the train tree |
 | [`docs/TRAINING.md`](docs/TRAINING.md) | cache → train, per reader |
 | [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) | scoring a cell, calibration, the report table |
