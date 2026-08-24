@@ -10,18 +10,19 @@ import torch
 
 from kinescore.core.clip import ViewLayout
 from kinescore.core.reader import Readout
-from kinescore.heads.keypoint import KeypointHead
+from kinescore.heads.keypoint import KeypointHead, KeypointQueryDecoder
 from kinescore.readers.keypoint import KeypointReader
 
 D = 32
 TOKENS_PER_VIEW = 4
 
 
-def _head(n_keypoints=5, **kwargs) -> KeypointHead:
+def _head(n_keypoints=5, n_views=3, **kwargs) -> KeypointHead:
     torch.manual_seed(0)
-    return KeypointHead(in_dim=D, n_keypoints=n_keypoints, d_model=16,
-                        n_heads=2, temporal_nhead=2, ff=32,
-                        n_temporal_layers=1, t_max=8, **kwargs)
+    return KeypointHead(in_dim=D, n_keypoints=n_keypoints, n_views=n_views,
+                        tokens_per_view=TOKENS_PER_VIEW, d_model=16,
+                        decoder_nhead=2, n_decoder_layers=2, temporal_nhead=2,
+                        ff=32, n_temporal_layers=1, t_max=8, **kwargs)
 
 
 class _StubBackbone:
@@ -44,10 +45,10 @@ class TestHead:
     def test_n_out_is_three_per_keypoint(self):
         assert _head(n_keypoints=8).n_out == 24
 
-    def test_any_token_count_is_pooled_away(self):
+    def test_a_token_count_the_head_was_not_built_for_is_refused(self):
         head = _head()
-        assert head(torch.randn(1, 3, 4, D)).shape == (1, 3, 5, 3)
-        assert head(torch.randn(1, 3, 64, D)).shape == (1, 3, 5, 3)
+        with pytest.raises(ValueError, match="built for 12 tokens"):
+            head(torch.randn(1, 3, 64, D))
 
     def test_temporal_context_changes_the_prediction(self):
         head = _head().eval()
@@ -92,7 +93,7 @@ class TestReader:
         layout = ViewLayout(n_views=n_views, tokens_per_view=TOKENS_PER_VIEW,
                             packing="width" if n_views > 1 else "none")
         return KeypointReader(
-            backbone=_StubBackbone(n_views), head=_head().eval(),
+            backbone=_StubBackbone(n_views), head=_head(n_views=n_views).eval(),
             view_layout=layout, robot_name="franka_panda",
             reader_id=f"franka_panda.{n_views}v", **kwargs)
 
@@ -150,3 +151,44 @@ class TestReader:
                                         dtype=torch.uint8))
 
         assert out.P.shape == (1, 20, 5, 3)
+
+
+class TestQueryDecoder:
+    def _decoder(self, n_keypoints=5, **kwargs) -> KeypointQueryDecoder:
+        torch.manual_seed(0)
+        return KeypointQueryDecoder(
+            in_dim=D, n_keypoints=n_keypoints, n_views=3,
+            tokens_per_view=TOKENS_PER_VIEW, d_model=16, nhead=2, ff=32,
+            n_layers=2, **kwargs).eval()
+
+    def test_one_embedding_per_keypoint(self):
+        out = self._decoder(n_keypoints=7)(torch.randn(2, 3, 12, D))
+
+        assert out.shape == (2, 3, 7, 16)
+
+    def test_queries_do_not_collapse_onto_each_other(self):
+        decoder = self._decoder()
+        with torch.no_grad():
+            out = decoder(torch.randn(1, 1, 12, D))[0, 0]
+
+        spread = (out[:, None] - out[None, :]).norm(dim=-1)
+        assert float(spread.max()) > 0
+
+    def test_position_is_part_of_the_read(self):
+        decoder = self._decoder()
+        feat = torch.randn(1, 1, 12, D)
+        with torch.no_grad():
+            straight = decoder(feat)
+            shuffled = decoder(feat[:, :, torch.randperm(12)])
+
+        assert not torch.allclose(straight, shuffled)
+
+    def test_positions_cover_every_token(self):
+        decoder = self._decoder()
+
+        assert decoder.positions().shape == (12, 16)
+
+    def test_a_non_square_patch_grid_is_refused(self):
+        with pytest.raises(ValueError, match="square patch grid"):
+            KeypointQueryDecoder(in_dim=D, n_keypoints=2, n_views=1,
+                                 tokens_per_view=5, d_model=16, nhead=2)

@@ -29,8 +29,10 @@ def robot():
 
 def _head(k) -> KeypointHead:
     torch.manual_seed(0)
-    return KeypointHead(in_dim=D, n_keypoints=k, d_model=16, n_heads=2,
-                        temporal_nhead=2, ff=32, n_temporal_layers=1, t_max=8)
+    return KeypointHead(in_dim=D, n_keypoints=k, n_views=1,
+                        tokens_per_view=TOKENS, d_model=16, decoder_nhead=2,
+                        n_decoder_layers=1, temporal_nhead=2, ff=32,
+                        n_temporal_layers=1, t_max=8)
 
 
 def _trainer(robot, **cfg_kwargs) -> KeypointTrainer:

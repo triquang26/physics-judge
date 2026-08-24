@@ -44,6 +44,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     add_config_arguments(parser)
 
 
+def _tokens_per_view(cache_dir) -> int:
+    """Patch tokens one view contributes, read off the cache the head reads.
+
+    The head addresses tokens by view and patch position, so it has to be
+    built for the grid the cache actually holds.
+    """
+    from kinescore.training.cache import load_cache
+
+    for split in ("train", "val"):
+        for path in sorted((cache_dir / split).glob("*.pt")):
+            _feat, header = load_cache(str(path), mmap=True)
+            return int(header.tokens_per_view)
+    raise SystemExit(f"no cache file under {cache_dir} to read a token grid from")
+
+
 def _uncached(tree, cache_dir) -> list[tuple[str, int, int]]:
     """Splits whose cache holds fewer episodes than the tree supervises.
 
@@ -111,7 +126,10 @@ def run(args: argparse.Namespace) -> int:
             f"but its forward kinematics produces {n_keypoints}")
 
     layout = reader.view.layout()
-    head = KeypointHead(in_dim=1024, n_keypoints=n_keypoints)
+    tokens_per_view = _tokens_per_view(cache_dir)
+    head = KeypointHead(in_dim=1024, n_keypoints=n_keypoints,
+                        n_views=layout.n_views,
+                        tokens_per_view=tokens_per_view)
     cfg = TrainConfig(
         steps=args.steps, batch_size=args.batch_size,
         window_size=args.window_size, lr=args.lr, lr_late=args.lr_late,

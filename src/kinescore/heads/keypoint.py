@@ -1,62 +1,156 @@
-"""The trained head: pooled DINO tokens -> 3-D keypoints.
+"""The trained head: DINO patch tokens -> 3-D keypoints.
 
-Three stages. :class:`FramePool` collapses each frame's patch tokens to one
-vector by attentive pooling; :class:`TemporalEncoder` mixes those vectors
-across the clip; a linear layer reads out ``K`` points. The temporal stage is
-bidirectional -- judging is offline, the whole clip is on disk -- and enters
-through a residual, so a head run per-frame (``use_context=False``) is never
-worse than one with no temporal stage at all.
+Three stages. :class:`KeypointQueryDecoder` gives every keypoint its own query
+and lets it cross-attend to the frame's patch tokens, so a point is read from
+the region that holds it rather than from one pooled frame vector.
+:class:`TemporalEncoder` then mixes each keypoint's track across the clip --
+bidirectional, since judging is offline and the whole clip is on disk -- and a
+linear layer reads out the coordinates.
 
 Output is ``(B, T, K, 3)`` metres in the robot-base frame. Nothing downstream
 converts it: the violation detectors are written against points.
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-__all__ = ["FramePool", "TemporalEncoder", "KeypointHead"]
+__all__ = ["KeypointQueryDecoder", "TemporalEncoder", "KeypointHead"]
 
 
-class FramePool(nn.Module):
-    """``(B, T, P, D) -> (B, T, d_model)``, one vector per frame.
+class _CrossBlock(nn.Module):
+    """Queries read prepared keys and values, then a feed-forward.
 
-    LayerNorm over ``D``, learned per-patch scores, softmax over patches, then
-    a multi-head weighted sum concatenated with the frame's mean token so the
-    global context survives a peaked attention map.
+    Keys and values are projected once by the decoder and shared, since the
+    tokens a query reads do not change between blocks.
+
+    Args:
+        d_model: Query width.
+        nhead: Attention heads.
+        ff: Feed-forward width.
+        dropout: Dropout probability.
+    """
+
+    def __init__(self, d_model: int, nhead: int, ff: int, dropout: float
+                ) -> None:
+        super().__init__()
+        self.nhead = int(nhead)
+        self.d_head = d_model // self.nhead
+        self.q_norm = nn.LayerNorm(d_model)
+        self.q_proj = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+        self.ff_norm = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, ff), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(ff, d_model))
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+                ) -> torch.Tensor:
+        """``(N, K, d)`` against ``(N, h, P, d_head)`` -> ``(N, K, d)``."""
+        n, kp, d = q.shape
+        qh = (self.q_proj(self.q_norm(q))
+              .reshape(n, kp, self.nhead, self.d_head).transpose(1, 2))
+        attended = F.scaled_dot_product_attention(qh, k, v)
+        q = q + self.out_proj(attended.transpose(1, 2).reshape(n, kp, d))
+        return q + self.ff(self.ff_norm(q))
+
+
+class KeypointQueryDecoder(nn.Module):
+    """``(B, T, P, D) -> (B, T, K, d_model)``, one query per keypoint.
+
+    Tokens are projected to ``d_model`` and given a position: a learned vector
+    per view plus one per patch row and column, so a query can address a place
+    in a view rather than an index in a flat sequence. ``K`` learned queries
+    then cross-attend to the frame's tokens. Keys and values are projected
+    once and shared across blocks: a frame's tokens are the same for every
+    block, and projecting them per block dominates memory and time alike.
 
     Args:
         in_dim: Token embed width ``D``.
-        d_model: Output width.
-        n_heads: Pooling heads.
+        n_keypoints: ``K``, queries and points.
+        n_views: Views packed into a frame.
+        tokens_per_view: Patch tokens one view contributes; must be square.
+        d_model: Query and token width.
+        nhead: Attention heads.
+        ff: Feed-forward width.
+        n_layers: Cross-attention blocks.
+        dropout: Dropout probability.
     """
 
-    def __init__(self, in_dim: int = 1024, d_model: int = 768, n_heads: int = 8
-                ) -> None:
+    def __init__(self, in_dim: int = 1024, n_keypoints: int = 12,
+                 n_views: int = 1, tokens_per_view: int = 576,
+                 d_model: int = 512, nhead: int = 8, ff: int = 2048,
+                 n_layers: int = 2, dropout: float = 0.1) -> None:
         super().__init__()
+        grid = int(math.isqrt(int(tokens_per_view)))
+        if grid * grid != int(tokens_per_view):
+            raise ValueError(
+                f"tokens_per_view must be a square patch grid, got "
+                f"{tokens_per_view}")
         self.in_dim = int(in_dim)
+        self.n_keypoints = int(n_keypoints)
+        self.n_views = int(n_views)
+        self.tokens_per_view = int(tokens_per_view)
         self.d_model = int(d_model)
-        self.n_heads = int(n_heads)
+        self.grid = grid
+
         self.norm = nn.LayerNorm(self.in_dim)
-        self.score = nn.Linear(self.in_dim, self.n_heads)
-        self.proj = nn.Linear(self.in_dim * (self.n_heads + 1), self.d_model)
-        self.act = nn.SiLU()
+        self.proj = nn.Linear(self.in_dim, self.d_model)
+        self.view_emb = nn.Parameter(torch.zeros(self.n_views, self.d_model))
+        self.row_emb = nn.Parameter(torch.zeros(grid, self.d_model))
+        self.col_emb = nn.Parameter(torch.zeros(grid, self.d_model))
+        self.query = nn.Parameter(torch.zeros(self.n_keypoints, self.d_model))
+        for p in (self.view_emb, self.row_emb, self.col_emb, self.query):
+            nn.init.trunc_normal_(p, std=0.02)
+        self.nhead = int(nhead)
+        self.kv_norm = nn.LayerNorm(self.d_model)
+        self.k_proj = nn.Linear(self.d_model, self.d_model)
+        self.v_proj = nn.Linear(self.d_model, self.d_model)
+        self.blocks = nn.ModuleList(
+            [_CrossBlock(self.d_model, nhead, ff, dropout)
+             for _ in range(int(n_layers))])
+        self.out_norm = nn.LayerNorm(self.d_model)
+
+    @property
+    def n_tokens(self) -> int:
+        """Tokens one frame carries, ``n_views * tokens_per_view``."""
+        return self.n_views * self.tokens_per_view
+
+    def positions(self) -> torch.Tensor:
+        """``(P, d_model)`` position vectors, view then row then column."""
+        pos = (self.view_emb[:, None, None, :]
+               + self.row_emb[None, :, None, :]
+               + self.col_emb[None, None, :, :])
+        return pos.reshape(self.n_tokens, self.d_model)
 
     def forward(self, feat: torch.Tensor) -> torch.Tensor:
-        """``(B, T, P, D) -> (B, T, d_model)``."""
+        """``(B, T, P, D) -> (B, T, K, d_model)``."""
         if feat.dim() != 4:
             raise ValueError(
-                f"FramePool expects (B, T, P, D), got shape {tuple(feat.shape)}")
-        x = self.norm(feat.float())
-        w = self.score(x).softmax(dim=2)
-        pooled = torch.einsum("btph,btpd->bthd", w, x)
-        pooled = pooled.reshape(*pooled.shape[:2], -1)
-        z = torch.cat([pooled, x.mean(dim=2)], dim=-1)
-        return self.act(self.proj(z))
+                f"KeypointQueryDecoder expects (B, T, P, D), got shape "
+                f"{tuple(feat.shape)}")
+        b, t, p, _ = feat.shape
+        if p != self.n_tokens:
+            raise ValueError(
+                f"KeypointQueryDecoder is built for {self.n_tokens} tokens "
+                f"({self.n_views} views x {self.tokens_per_view}), got {p}")
+        n = b * t
+        kv = self.proj(self.norm(feat)).reshape(n, p, self.d_model)
+        kv = self.kv_norm(kv + self.positions())
+        heads = (n, p, self.nhead, self.d_model // self.nhead)
+        k = self.k_proj(kv).reshape(heads).transpose(1, 2)
+        v = self.v_proj(kv).reshape(heads).transpose(1, 2)
+        q = self.query.expand(n, self.n_keypoints, self.d_model)
+        for block in self.blocks:
+            q = block(q, k, v)
+        return self.out_norm(q).reshape(b, t, self.n_keypoints, self.d_model)
 
 
 class TemporalEncoder(nn.Module):
-    """Bidirectional Transformer over frame tokens.
+    """Bidirectional Transformer over one track's frames.
 
     Pre-norm encoder with a learned positional table covering ``t_max`` frames
     and no causal mask. ``use_context=False`` returns the input untouched, so
@@ -90,7 +184,7 @@ class TemporalEncoder(nn.Module):
         nn.init.trunc_normal_(self.pos_emb, std=0.02)
 
     def forward(self, z: torch.Tensor, use_context: bool = True) -> torch.Tensor:
-        """``(B, T, d_model) -> (B, T, d_model)``."""
+        """``(N, T, d_model) -> (N, T, d_model)``."""
         if not use_context:
             return z
         t = z.shape[1]
@@ -103,15 +197,22 @@ class TemporalEncoder(nn.Module):
 
 
 class KeypointHead(nn.Module):
-    """:class:`FramePool` -> residual :class:`TemporalEncoder` -> ``K`` points.
+    """:class:`KeypointQueryDecoder` -> per-track :class:`TemporalEncoder` -> points.
+
+    The temporal stage runs over each keypoint's own track and enters through
+    a residual, so a head read per frame (``use_context=False``) still yields
+    the decoder's points.
 
     Args:
         in_dim: Token embed width ``D``.
         n_keypoints: ``K``, points predicted per frame.
-        d_model: Frame/temporal token width.
-        n_heads: Pooling heads.
+        n_views: Views packed into a frame.
+        tokens_per_view: Patch tokens one view contributes.
+        d_model: Query and temporal token width.
+        decoder_nhead: Cross-attention heads.
+        n_decoder_layers: Cross-attention blocks.
         temporal_nhead: Temporal-attention heads.
-        ff: Temporal feed-forward width.
+        ff: Feed-forward width, decoder and temporal alike.
         n_temporal_layers: Temporal encoder layers.
         t_max: Frames the positional table covers.
         dropout: Dropout probability.
@@ -122,7 +223,9 @@ class KeypointHead(nn.Module):
     """
 
     def __init__(self, in_dim: int = 1024, n_keypoints: int = 12,
-                 d_model: int = 768, n_heads: int = 8, temporal_nhead: int = 8,
+                 n_views: int = 1, tokens_per_view: int = 576,
+                 d_model: int = 512, decoder_nhead: int = 8,
+                 n_decoder_layers: int = 2, temporal_nhead: int = 8,
                  ff: int = 2048, n_temporal_layers: int = 4, t_max: int = 64,
                  dropout: float = 0.1) -> None:
         super().__init__()
@@ -130,30 +233,44 @@ class KeypointHead(nn.Module):
             raise ValueError(f"n_keypoints must be >= 1, got {n_keypoints}")
         self.in_dim = int(in_dim)
         self.n_keypoints = int(n_keypoints)
+        self.n_views = int(n_views)
+        self.tokens_per_view = int(tokens_per_view)
         self.d_model = int(d_model)
-        self.n_heads = int(n_heads)
+        self.decoder_nhead = int(decoder_nhead)
+        self.n_decoder_layers = int(n_decoder_layers)
         self.temporal_nhead = int(temporal_nhead)
         self.ff = int(ff)
         self.n_temporal_layers = int(n_temporal_layers)
         self.t_max = int(t_max)
         self.dropout = float(dropout)
 
-        self.pool = FramePool(in_dim=self.in_dim, d_model=self.d_model,
-                              n_heads=self.n_heads)
+        self.decoder = KeypointQueryDecoder(
+            in_dim=self.in_dim, n_keypoints=self.n_keypoints,
+            n_views=self.n_views, tokens_per_view=self.tokens_per_view,
+            d_model=self.d_model, nhead=self.decoder_nhead, ff=self.ff,
+            n_layers=self.n_decoder_layers, dropout=dropout,
+        )
         self.temporal = TemporalEncoder(
             d_model=self.d_model, nhead=self.temporal_nhead, ff=self.ff,
             n_layers=self.n_temporal_layers, t_max=self.t_max, dropout=dropout,
         )
-        self.mu_head = nn.Linear(self.d_model, self.n_out)
+        self.mu_head = nn.Linear(self.d_model, 3)
 
     @property
     def n_out(self) -> int:
         """Readout width, ``3 * n_keypoints``. The checkpoint records this."""
         return 3 * self.n_keypoints
 
+    def _context(self, z: torch.Tensor) -> torch.Tensor:
+        """``(B, T, K, d)`` -> the temporal stage's output, same shape."""
+        b, t, k, d = z.shape
+        tracks = z.permute(0, 2, 1, 3).reshape(b * k, t, d)
+        return self.temporal(tracks).reshape(b, k, t, d).permute(0, 2, 1, 3)
+
     def forward(self, feat: torch.Tensor, use_context: bool = True
                ) -> torch.Tensor:
         """``(B, T, P, D) -> (B, T, K, 3)``."""
-        z_frame = self.pool(feat)
-        z = z_frame + self.temporal(z_frame, use_context=use_context)
-        return self.mu_head(z).reshape(*z.shape[:2], self.n_keypoints, 3)
+        z = self.decoder(feat)
+        if use_context:
+            z = z + self._context(z)
+        return self.mu_head(z)

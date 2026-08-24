@@ -26,16 +26,18 @@ __all__ = [
 #: Architecture the keypoint head family is trained with. Applied for any
 #: :data:`HEAD_CTOR_KEYS` a checkpoint's ``cfg`` omits.
 HEAD_DEFAULTS: dict[str, Any] = {
-    "d_model": 768, "n_heads": 8, "temporal_nhead": 8, "ff": 2048,
-    "n_temporal_layers": 4, "t_max": 64, "dropout": 0.1,
+    "d_model": 512, "decoder_nhead": 8, "n_decoder_layers": 2,
+    "temporal_nhead": 8, "ff": 2048, "n_temporal_layers": 4, "t_max": 64,
+    "dropout": 0.1, "n_views": 1, "tokens_per_view": 576,
 }
 
 #: :class:`~kinescore.heads.keypoint.KeypointHead`'s keyword set. The saved
 #: ``cfg`` is filtered to this before construction, so the identity fields it
 #: also carries never reach the constructor.
 HEAD_CTOR_KEYS = frozenset({
-    "in_dim", "d_model", "n_heads", "temporal_nhead", "ff",
-    "n_temporal_layers", "t_max", "dropout",
+    "in_dim", "n_views", "tokens_per_view", "d_model", "decoder_nhead",
+    "n_decoder_layers", "temporal_nhead", "ff", "n_temporal_layers", "t_max",
+    "dropout",
 })
 
 
@@ -107,8 +109,10 @@ def save_reader(path: str, head: KeypointHead, *, cell_id: str, robot: str,
         "n_views": view_layout.n_views,
         "packing": view_layout.packing,
         "in_dim": head.in_dim,
+        "tokens_per_view": head.tokens_per_view,
         "d_model": head.d_model,
-        "n_heads": head.n_heads,
+        "decoder_nhead": head.decoder_nhead,
+        "n_decoder_layers": head.n_decoder_layers,
         "temporal_nhead": head.temporal_nhead,
         "ff": head.ff,
         "n_temporal_layers": head.n_temporal_layers,

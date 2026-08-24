@@ -34,8 +34,9 @@ class _StubBackbone:
 
 def _head(n_keypoints=8) -> KeypointHead:
     torch.manual_seed(0)
-    return KeypointHead(in_dim=D, n_keypoints=n_keypoints, d_model=16,
-                        n_heads=2, temporal_nhead=2, ff=32,
+    return KeypointHead(in_dim=D, n_keypoints=n_keypoints, n_views=3,
+                        tokens_per_view=4, d_model=16, decoder_nhead=2,
+                        n_decoder_layers=1, temporal_nhead=2, ff=32,
                         n_temporal_layers=1, t_max=8)
 
 
