@@ -11,6 +11,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     from kinescore.cli._shared import add_config_arguments
 
     parser.add_argument("--reader", required=True, help="reader id")
+    parser.add_argument("--head", default="keypoint",
+                        choices=("keypoint", "diffusion"),
+                        help="head architecture to fit")
     parser.add_argument("--steps", type=int, default=6000)
     parser.add_argument("--batch-size", type=int, default=32,
                         help="windows per step")
@@ -91,8 +94,7 @@ def run(args: argparse.Namespace) -> int:
     import torch
 
     from kinescore.cli._shared import load, now, resolve_reader
-    from kinescore.heads.keypoint import KeypointHead
-    from kinescore.readers.checkpoint import save_reader
+    from kinescore.readers.checkpoint import HEAD_CLASSES, save_reader
     from kinescore.registry.provenance import (
         git_state,
         run_manifest,
@@ -134,9 +136,9 @@ def run(args: argparse.Namespace) -> int:
 
     layout = reader.view.layout()
     tokens_per_view = _tokens_per_view(cache_dir)
-    head = KeypointHead(in_dim=1024, n_keypoints=n_keypoints,
-                        n_views=layout.n_views,
-                        tokens_per_view=tokens_per_view)
+    head = HEAD_CLASSES[args.head](in_dim=1024, n_keypoints=n_keypoints,
+                                   n_views=layout.n_views,
+                                   tokens_per_view=tokens_per_view)
     cfg = TrainConfig(
         steps=args.steps, batch_size=args.batch_size,
         window_size=args.window_size, lr=args.lr, lr_late=args.lr_late,
@@ -188,6 +190,7 @@ def run(args: argparse.Namespace) -> int:
 
     summary = {
         "reader_id": reader.reader_id,
+        "head": args.head,
         "checkpoint": out,
         "checkpoint_sha256": sha256_file(out),
         "train_mm": result.train_mm,

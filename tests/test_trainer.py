@@ -11,6 +11,7 @@ import pytest
 import torch
 
 from kinescore.core.clip import ViewLayout
+from kinescore.heads.diffusion import DiffusionKeypointHead
 from kinescore.heads.keypoint import KeypointHead
 from kinescore.robots import get_robot
 from kinescore.training.cache import CACHE_SCHEMA_VERSION, CacheHeader, write_cache
@@ -35,11 +36,21 @@ def _head(k) -> KeypointHead:
                         n_temporal_layers=1, t_max=8)
 
 
-def _trainer(robot, **cfg_kwargs) -> KeypointTrainer:
+def _diffusion_head(k) -> DiffusionKeypointHead:
+    torch.manual_seed(0)
+    return DiffusionKeypointHead(in_dim=D, n_keypoints=k, n_views=1,
+                                 tokens_per_view=TOKENS, d_model=16,
+                                 decoder_nhead=2, n_decoder_layers=1,
+                                 temporal_nhead=2, ff=32, n_temporal_layers=1,
+                                 t_max=8, n_coord_freqs=3, sample_steps=2,
+                                 n_samples=1)
+
+
+def _trainer(robot, head=None, **cfg_kwargs) -> KeypointTrainer:
     k = KeypointTrainer.n_keypoints(robot)
     cfg = TrainConfig(steps=4, batch_size=2, window_size=4, eval_every=2,
                       log_every=0, **cfg_kwargs)
-    return KeypointTrainer(_head(k), robot, reader_id=READER_ID,
+    return KeypointTrainer(head or _head(k), robot, reader_id=READER_ID,
                            view_layout=LAYOUT, cfg=cfg)
 
 
@@ -225,6 +236,34 @@ class TestLoop:
         trainer = _trainer(robot)
         episodes = trainer.load_episodes(cache_root, annotation_root, "val")
         assert trainer.evaluate(trainer.head, episodes)["keypoint_mm"] > 0
+
+
+class TestDiffusionHead:
+    def test_fit_calibrates_the_head_against_the_train_targets(self, tmp_path,
+                                                               robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        head = _diffusion_head(KeypointTrainer.n_keypoints(robot))
+        trainer = _trainer(robot, head=head)
+        train_eps = trainer.load_episodes(cache_root, annotation_root, "train")
+
+        result = trainer.fit(train_episodes=train_eps)
+
+        points = torch.cat([t for _path, t in train_eps]).reshape(-1, 3)
+        assert bool(head.workspace.fitted)
+        assert bool((head.workspace.lo < points.amin(dim=0)).all())
+        assert bool((head.workspace.hi > points.amax(dim=0)).all())
+        assert len(result.loss_history) == 4
+        assert result.train_mm > 0
+
+    def test_reading_an_uncalibrated_head_is_refused(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot,
+                           head=_diffusion_head(
+                               KeypointTrainer.n_keypoints(robot)))
+        episodes = trainer.load_episodes(cache_root, annotation_root, "val")
+
+        with pytest.raises(RuntimeError, match="not fitted"):
+            trainer.evaluate(trainer.head, episodes)
 
 
 class TestPreload:

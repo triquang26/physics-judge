@@ -13,12 +13,26 @@ converts it: the violation detectors are written against points.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["KeypointQueryDecoder", "TemporalEncoder", "KeypointHead"]
+__all__ = ["KeypointQueryDecoder", "TemporalEncoder", "KeypointHead",
+           "masked_smooth_l1", "temporal_tracks"]
+
+
+def masked_smooth_l1(pred: torch.Tensor, target: torch.Tensor,
+                     mask: torch.Tensor, *, beta: float) -> torch.Tensor:
+    """Smooth-L1 between ``(B, T, K, 3)`` tensors over the frames ``mask`` keeps.
+
+    ``mask`` is ``(B, T)`` with ``1`` on a real frame, so padded frames are
+    excluded from the loss itself rather than from the reported metric alone.
+    """
+    per_frame = F.smooth_l1_loss(
+        pred, target, beta=beta, reduction="none").mean(dim=(-1, -2))
+    return (per_frame * mask).sum() / mask.sum().clamp_min(1e-8)
 
 
 class _CrossBlock(nn.Module):
@@ -126,8 +140,14 @@ class KeypointQueryDecoder(nn.Module):
                + self.col_emb[None, None, :, :])
         return pos.reshape(self.n_tokens, self.d_model)
 
-    def forward(self, feat: torch.Tensor) -> torch.Tensor:
-        """``(B, T, P, D) -> (B, T, K, d_model)``."""
+    def keys_values(self, feat: torch.Tensor
+                   ) -> tuple[torch.Tensor, torch.Tensor]:
+        """``(B, T, P, D)`` -> keys and values, ``(B*T, h, P, d_head)`` each.
+
+        Raises:
+            ValueError: If ``feat`` is not four-dimensional, or carries a
+                token count the decoder was not built for.
+        """
         if feat.dim() != 4:
             raise ValueError(
                 f"KeypointQueryDecoder expects (B, T, P, D), got shape "
@@ -141,12 +161,26 @@ class KeypointQueryDecoder(nn.Module):
         kv = self.proj(self.norm(feat)).reshape(n, p, self.d_model)
         kv = self.kv_norm(kv + self.positions())
         heads = (n, p, self.nhead, self.d_model // self.nhead)
-        k = self.k_proj(kv).reshape(heads).transpose(1, 2)
-        v = self.v_proj(kv).reshape(heads).transpose(1, 2)
-        q = self.query.expand(n, self.n_keypoints, self.d_model)
+        return (self.k_proj(kv).reshape(heads).transpose(1, 2),
+                self.v_proj(kv).reshape(heads).transpose(1, 2))
+
+    def queries(self, n: int) -> torch.Tensor:
+        """``(n, K, d_model)``: one learned query per keypoint, per frame."""
+        return self.query.expand(n, self.n_keypoints, self.d_model)
+
+    def decode(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+              ) -> torch.Tensor:
+        """``(N, K, d)`` queries against :meth:`keys_values` -> ``(N, K, d)``."""
         for block in self.blocks:
             q = block(q, k, v)
-        return self.out_norm(q).reshape(b, t, self.n_keypoints, self.d_model)
+        return self.out_norm(q)
+
+    def forward(self, feat: torch.Tensor) -> torch.Tensor:
+        """``(B, T, P, D) -> (B, T, K, d_model)``."""
+        k, v = self.keys_values(feat)
+        b, t = feat.shape[0], feat.shape[1]
+        z = self.decode(self.queries(b * t), k, v)
+        return z.reshape(b, t, self.n_keypoints, self.d_model)
 
 
 class TemporalEncoder(nn.Module):
@@ -196,6 +230,13 @@ class TemporalEncoder(nn.Module):
         return self.encoder(z + self.pos_emb[:, :t])
 
 
+def temporal_tracks(encoder: TemporalEncoder, z: torch.Tensor) -> torch.Tensor:
+    """``(B, T, K, d)`` through ``encoder``, one track per keypoint."""
+    b, t, k, d = z.shape
+    tracks = encoder(z.permute(0, 2, 1, 3).reshape(b * k, t, d))
+    return tracks.reshape(b, k, t, d).permute(0, 2, 1, 3)
+
+
 class KeypointHead(nn.Module):
     """:class:`KeypointQueryDecoder` -> per-track :class:`TemporalEncoder` -> points.
 
@@ -221,6 +262,8 @@ class KeypointHead(nn.Module):
         - Input: ``(B, T, P, D)``.
         - Output: ``(B, T, K, 3)`` metres, robot-base frame.
     """
+
+    head_kind = "keypoint"
 
     def __init__(self, in_dim: int = 1024, n_keypoints: int = 12,
                  n_views: int = 1, tokens_per_view: int = 576,
@@ -261,16 +304,20 @@ class KeypointHead(nn.Module):
         """Readout width, ``3 * n_keypoints``. The checkpoint records this."""
         return 3 * self.n_keypoints
 
-    def _context(self, z: torch.Tensor) -> torch.Tensor:
-        """``(B, T, K, d)`` -> the temporal stage's output, same shape."""
-        b, t, k, d = z.shape
-        tracks = z.permute(0, 2, 1, 3).reshape(b * k, t, d)
-        return self.temporal(tracks).reshape(b, k, t, d).permute(0, 2, 1, 3)
+    def calibrate(self, targets: Sequence[torch.Tensor], *,
+                  margin: float = 0.05) -> None:
+        """Take the training targets; a metre readout derives nothing from them."""
+
+    def training_loss(self, feat: torch.Tensor, target: torch.Tensor,
+                      mask: torch.Tensor, *, beta: float = 0.05
+                     ) -> torch.Tensor:
+        """Masked smooth-L1, metres, between the read points and ``target``."""
+        return masked_smooth_l1(self(feat), target, mask, beta=beta)
 
     def forward(self, feat: torch.Tensor, use_context: bool = True
                ) -> torch.Tensor:
         """``(B, T, P, D) -> (B, T, K, 3)``."""
         z = self.decoder(feat)
         if use_context:
-            z = z + self._context(z)
+            z = z + temporal_tracks(self.temporal, z)
         return self.mu_head(z)

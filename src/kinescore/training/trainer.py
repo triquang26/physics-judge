@@ -32,11 +32,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from kinescore.core.clip import ViewLayout
 from kinescore.core.robot import RobotSpec
-from kinescore.heads.keypoint import KeypointHead
+from kinescore.heads import AnyKeypointHead
+from kinescore.heads.keypoint import masked_smooth_l1
 from kinescore.training.cache import assert_real_joint_source, load_cache
 
 __all__ = [
@@ -134,6 +134,9 @@ class TrainConfig:
     huber_beta:
         Smooth-L1 transition point, metres. Below it the loss is quadratic, so
         sub-centimetre error is not swamped by the occasional gross miss.
+    workspace_margin:
+        Headroom, as a fraction of each axis' span, left around the training
+        targets when a head is calibrated against them.
     seed:
         Seeds both the optimiser init and the window sampler.
     read_workers:
@@ -163,6 +166,7 @@ class TrainConfig:
     lr_step_at: int = 1500
     weight_decay: float = 1e-4
     huber_beta: float = 0.05
+    workspace_margin: float = 0.05
     seed: int = 0
     read_workers: int = 16
     preload: bool = False
@@ -224,9 +228,9 @@ class KeypointTrainer:
         If ``head.n_keypoints`` disagrees with the robot's keypoint count.
     """
 
-    def __init__(self, head: KeypointHead, robot: RobotSpec, *, reader_id: str,
-                 view_layout: ViewLayout, cfg: TrainConfig | None = None
-                 ) -> None:
+    def __init__(self, head: AnyKeypointHead, robot: RobotSpec, *,
+                 reader_id: str, view_layout: ViewLayout,
+                 cfg: TrainConfig | None = None) -> None:
         expected = self.n_keypoints(robot)
         if head.n_keypoints != expected:
             raise ValueError(
@@ -482,13 +486,10 @@ class KeypointTrainer:
         padded frames are excluded from the loss itself, not merely from the
         reported metric.
         """
-        per_frame = F.smooth_l1_loss(
-            pred, target, beta=self.cfg.huber_beta, reduction="none",
-        ).mean(dim=(-1, -2))
-        return (per_frame * mask).sum() / mask.sum().clamp_min(1e-8)
+        return masked_smooth_l1(pred, target, mask, beta=self.cfg.huber_beta)
 
     @torch.no_grad()
-    def evaluate(self, head: KeypointHead, episodes: list[Episode]) -> dict:
+    def evaluate(self, head: AnyKeypointHead, episodes: list[Episode]) -> dict:
         """Root-mean-square per-keypoint 3-D error, millimetres.
 
         Each episode is scored in chunks of ``head.t_max``, so a clip longer
@@ -523,7 +524,8 @@ class KeypointTrainer:
         ----------
         train_episodes, val_episodes:
             From :meth:`load_episodes`. Without a validation split there is no
-            best-by-val selection and the final state is returned.
+            best-by-val selection and the final state is returned. The head is
+            calibrated against the training targets before the first step.
         progress:
             ``progress(step, loss)``, or ``None``.
         on_eval:
@@ -536,6 +538,8 @@ class KeypointTrainer:
         device = torch.device(cfg.device)
         head = self.head.to(device)
         self.head = head
+        head.calibrate([target for _path, target in train_episodes],
+                       margin=cfg.workspace_margin)
 
         torch.manual_seed(cfg.seed)
         opt = torch.optim.AdamW(head.parameters(), lr=cfg.lr,
@@ -553,7 +557,7 @@ class KeypointTrainer:
         head.train()
         for step in range(1, cfg.steps + 1):
             f, y, m = self._sample_windows(train_episodes, gen=gen, device=device)
-            loss = self.compute_loss(head(f), y, m)
+            loss = head.training_loss(f, y, m, beta=cfg.huber_beta)
 
             opt.zero_grad()
             loss.backward()

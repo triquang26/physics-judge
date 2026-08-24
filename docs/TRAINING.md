@@ -51,6 +51,7 @@ anyway.
 
 | flag | default |
 |---|---|
+| `--head` | `keypoint` (see Heads) |
 | `--steps` | `6000` |
 | `--batch-size` | `32` windows per step |
 | `--window-size` | `16` frames per window |
@@ -67,6 +68,24 @@ Before anything is built, the command checks `configs/robots.yaml`'s declared
 keypoint count against what the robot's forward kinematics actually produces and
 exits if they disagree — a mismatch would train a head whose outputs no detector
 can interpret.
+
+## Heads
+
+`--head keypoint` regresses the coordinates: `K` queries cross-attend to the
+frame's patch tokens, a bidirectional temporal encoder mixes each keypoint's
+track, and a linear layer reads out metres.
+
+`--head diffusion` denoises them instead. The query carries a noised keypoint
+and the noise level it was drawn at, and the head predicts the clean
+coordinate; a read is DDIM sampling with `eta = 0`, and `n_samples` samples are
+averaged. Coordinates are normalised to `[-1, 1]` by a workspace box measured
+off the training targets at the start of `fit` and stored in the checkpoint, so
+a loaded head reads in the units it was trained on and a head asked to read
+before the box is fitted raises rather than guessing one.
+
+Both heads answer the same contract -- `(B, T, P, D)` tokens in, `(B, T, K, 3)`
+metres out -- so the checkpoint records which one it holds and `load_reader`
+rebuilds it.
 
 ## Memory
 

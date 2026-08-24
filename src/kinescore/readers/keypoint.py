@@ -22,7 +22,7 @@ import torch
 from kinescore.backbones.dino import FeatureBackbone
 from kinescore.core.clip import ViewLayout
 from kinescore.core.reader import Readout
-from kinescore.heads.keypoint import KeypointHead
+from kinescore.heads import AnyKeypointHead
 from kinescore.readers._frames import normalize_frames
 
 __all__ = ["KeypointReader"]
@@ -37,7 +37,8 @@ class KeypointReader:
     backbone:
         A :class:`~kinescore.backbones.dino.FeatureBackbone`.
     head:
-        A :class:`~kinescore.heads.keypoint.KeypointHead`.
+        A :class:`~kinescore.heads.keypoint.KeypointHead` or a
+        :class:`~kinescore.heads.diffusion.DiffusionKeypointHead`.
     view_layout:
         Camera packing the head was trained on. The token count of every
         encoded frame is checked against it, so a three-panel head cannot
@@ -59,7 +60,7 @@ class KeypointReader:
     """
 
     backbone: FeatureBackbone
-    head: KeypointHead
+    head: AnyKeypointHead
     view_layout: ViewLayout
     robot_name: str
     reader_id: str
