@@ -12,19 +12,23 @@ contiguous within one episode. Each step samples one window per batch slot,
 zero-padding an episode shorter than the window and masking the padding out of
 the loss.
 
-Only the target is held in memory. Tokens stay on disk: a three-panel episode
-is a few hundred megabytes and a split runs to hundreds of episodes, far past
-any ordinary allocation, so a window is memory-mapped, copied, and released at
-the point it is sampled. Resident token memory is therefore one batch of
-windows regardless of how large the split is.
+Tokens stay on disk by default: a four-panel episode is a few hundred
+megabytes, so a window is memory-mapped, copied, and released where it is
+sampled, and resident token memory is one batch whatever the split's size.
+Training then runs at the storage's random-read rate, which on network storage
+is well under what the head can consume. ``preload`` trades memory for that
+rate, holding a split's tokens in RAM once so every step reads at memory
+speed; a split that does not fit available memory is refused, not swapped.
 """
 from __future__ import annotations
 
 import copy
 import glob
 import os
-from concurrent.futures import ThreadPoolExecutor
+import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -46,6 +50,60 @@ DEFAULT_JOINT_KEY = "observation.state.joint_position"
 #: One loaded episode: ``(cache_path, target (T, K, 3) fp32)``. Tokens are read
 #: from ``cache_path`` a window at a time; see :meth:`KeypointTrainer.read_window`.
 Episode = tuple[str, torch.Tensor]
+
+#: One materialised window: ``(feat, target, mask)``, padded to ``window_size``.
+_Window = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+
+
+def _meminfo_available() -> int:
+    """Bytes the host reports free, from ``MemAvailable``."""
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    raise RuntimeError("/proc/meminfo has no MemAvailable")
+
+
+#: ``memory.stat`` keys the kernel cannot reclaim under pressure.
+_UNRECLAIMABLE = ("anon", "slab", "unevictable")
+
+
+def _cgroup_headroom() -> int:
+    """Bytes an allocation may still take in this cgroup, or ``sys.maxsize``.
+
+    The host's free memory is not what a process may take: under a container
+    or a batch scheduler the enforced ceiling is the cgroup's, and exceeding
+    it is a kill with nothing raised to catch. Every level up the hierarchy
+    applies, so the tightest wins. Page cache counts toward the ceiling but is
+    reclaimed rather than fatal, so only what the kernel cannot reclaim is
+    charged against the limit here.
+    """
+    try:
+        with open("/proc/self/cgroup") as f:
+            rel = f.read().split(":")[-1].strip()
+    except OSError:
+        return sys.maxsize
+    node = Path("/sys/fs/cgroup") / rel.lstrip("/")
+    headroom = sys.maxsize
+    while node != Path("/sys/fs/cgroup") and node.is_dir():
+        try:
+            limit = (node / "memory.max").read_text().strip()
+            stat = dict(line.split(maxsplit=1)
+                        for line in (node / "memory.stat").read_text()
+                        .splitlines())
+        except (OSError, ValueError):
+            node = node.parent
+            continue
+        if limit != "max":
+            pinned = sum(int(stat.get(k, 0)) for k in _UNRECLAIMABLE)
+            headroom = min(headroom, int(limit) - pinned)
+        node = node.parent
+    return max(0, headroom)
+
+
+def _available_memory() -> int:
+    """Bytes this process may actually take, host and cgroup alike."""
+    return min(_meminfo_available(), _cgroup_headroom())
 
 
 def _episode_sort_key(path: str) -> tuple[int, object]:
@@ -78,6 +136,19 @@ class TrainConfig:
         sub-centimetre error is not swamped by the occasional gross miss.
     seed:
         Seeds both the optimiser init and the window sampler.
+    read_workers:
+        Threads reading token windows. Reads are latency-bound on network
+        storage, so more threads raise throughput until the link saturates.
+    preload:
+        Hold every episode's tokens in RAM instead of reading windows from
+        storage each step.
+    buffer_bytes:
+        Memory for a resident pool of sampled windows (``0`` = read every
+        batch from storage). A step then reads ``buffer_refresh`` windows
+        rather than ``batch_size``.
+    buffer_refresh:
+        Windows replaced per step while a buffer is in use. Higher mixes the
+        pool faster and reads more.
     eval_every, log_every:
         Cadences in steps; ``0`` disables.
     device:
@@ -93,7 +164,10 @@ class TrainConfig:
     weight_decay: float = 1e-4
     huber_beta: float = 0.05
     seed: int = 0
-    read_workers: int = 4
+    read_workers: int = 16
+    preload: bool = False
+    buffer_bytes: int = 0
+    buffer_refresh: int = 4
     eval_every: int = 500
     log_every: int = 200
     device: str = "cpu"
@@ -166,6 +240,9 @@ class KeypointTrainer:
         self.cfg = cfg or TrainConfig()
         self._readers = ThreadPoolExecutor(
             max_workers=max(1, self.cfg.read_workers))
+        self._resident: dict[str, torch.Tensor] = {}
+        self._buffer: list[_Window] | None = None
+        self._pending: list[tuple[int, Future]] = []
 
     @staticmethod
     def n_keypoints(robot: RobotSpec) -> int:
@@ -241,17 +318,122 @@ class KeypointTrainer:
             progress(f"[{split}] {len(episodes)} episodes loaded")
         return episodes
 
+    def preload(self, episodes: list[Episode], *, progress=None) -> int:
+        """Read ``episodes``' tokens into RAM and return the bytes held.
+
+        Every step then reads at memory speed rather than the storage's
+        random-read rate. Already-resident episodes are kept, so calling this
+        for train and then val holds both.
+
+        Raises
+        ------
+        MemoryError
+            If the split does not fit in available memory. Half of what is
+            free is the ceiling: the trainer still needs room for batches, and
+            a split that only fits by swapping reads slower than the disk it
+            replaced.
+        """
+        want = sum(os.path.getsize(p) for p, _ in episodes
+                   if p not in self._resident)
+        free = _available_memory()
+        if want > free // 2:
+            raise MemoryError(
+                f"preloading {len(episodes)} episodes needs {want / 2**30:.0f} "
+                f"GiB but only {free / 2**30:.0f} GiB is available; train "
+                f"without --preload, or with fewer episodes (--limit)")
+        held = 0
+        for i, (path, _target) in enumerate(episodes, 1):
+            if path not in self._resident:
+                feat, _header = load_cache(path, reader_id=self.reader_id,
+                                           view_layout=self.view_layout)
+                self._resident[path] = feat
+            held += self._resident[path].numel() * self._resident[path].element_size()
+            if progress and i % 50 == 0:
+                progress(f"preloaded {i}/{len(episodes)} episodes, "
+                         f"{held / 2**30:.1f} GiB")
+        if progress:
+            progress(f"{len(episodes)} episodes resident, {held / 2**30:.1f} GiB")
+        return held
+
     def read_window(self, path: str, start: int, size: int) -> torch.Tensor:
         """``(size, n_tokens, D)`` tokens from ``path``, starting at ``start``.
 
-        The file is mapped, the window copied out, and the mapping dropped, so
-        resident token memory never grows past the windows currently in hand.
-        A window running past the end of the episode comes back short; the
-        caller pads it and masks the padding out of the loss.
+        A resident episode is sliced in place. Otherwise the file is mapped,
+        the window copied out, and the mapping dropped, so resident token
+        memory never grows past the windows currently in hand. A window
+        running past the end of the episode comes back short; the caller pads
+        it and masks the padding out of the loss.
         """
+        feat = self._resident.get(path)
+        if feat is not None:
+            return feat[start:start + size]
         feat, _header = load_cache(path, reader_id=self.reader_id,
                                    view_layout=self.view_layout, mmap=True)
         return feat[start:start + size].clone()
+
+    def _pick(self, episodes: list[Episode], *, gen: torch.Generator
+              ) -> tuple[str, torch.Tensor, int, int]:
+        """One ``(path, target, start, length)`` window to read."""
+        window = self.cfg.window_size
+        ei = int(torch.randint(0, len(episodes), (1,), generator=gen))
+        path, target = episodes[ei]
+        t = int(target.shape[0])
+        w = min(window, t)
+        s = (0 if t <= window
+             else int(torch.randint(0, t - window, (1,), generator=gen)))
+        return path, target, s, w
+
+    def _materialize(self, pick: tuple[str, torch.Tensor, int, int]
+                     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Read one pick into ``(feat, target, mask)``, zero-padded to size."""
+        path, target, s, w = pick
+        window = self.cfg.window_size
+        f = self.read_window(path, s, w)
+        y = target[s:s + w]
+        if w < window:
+            f = torch.cat([f, f.new_zeros(window - w, *f.shape[1:])])
+            y = torch.cat([y, y.new_zeros(window - w, *y.shape[1:])])
+        return f, y, torch.cat([torch.ones(w), torch.zeros(window - w)])
+
+    def fill_buffer(self, episodes: list[Episode], *, gen: torch.Generator,
+                    progress=None) -> int:
+        """Fill the sampling buffer and return the windows it holds.
+
+        Raises
+        ------
+        MemoryError
+            If ``cfg.buffer_bytes`` exceeds what this process may take.
+        """
+        budget = self.cfg.buffer_bytes
+        free = _available_memory()
+        if budget > free // 2:
+            raise MemoryError(
+                f"a {budget / 2**30:.1f} GiB window buffer exceeds the "
+                f"{free / 2**30:.1f} GiB available to this process")
+        first = self._materialize(self._pick(episodes, gen=gen))
+        per_window = first[0].numel() * first[0].element_size()
+        n = max(self.cfg.batch_size, budget // per_window)
+        rest = [self._pick(episodes, gen=gen) for _ in range(n - 1)]
+        self._buffer = [first, *self._readers.map(self._materialize, rest)]
+        if progress:
+            progress(f"buffer holds {n} windows, "
+                     f"{n * per_window / 2**30:.1f} GiB")
+        return n
+
+    def _drain(self) -> None:
+        """Move completed refills into the buffer."""
+        for slot, future in self._pending:
+            self._buffer[slot] = future.result()
+        self._pending = []
+
+    def _refill(self, episodes: list[Episode], *, gen: torch.Generator) -> None:
+        """Submit this step's replacements, collected at the next."""
+        slots = torch.randint(0, len(self._buffer), (self.cfg.buffer_refresh,),
+                              generator=gen)
+        self._pending = [
+            (int(slot), self._readers.submit(self._materialize,
+                                             self._pick(episodes, gen=gen)))
+            for slot in slots]
 
     def _sample_windows(self, episodes: list[Episode], *, gen: torch.Generator,
                         device: torch.device
@@ -265,35 +447,30 @@ class KeypointTrainer:
         ``gen``, so a seed reproduces a run whatever the reads do; only the
         reads themselves are spread across ``cfg.read_workers``.
 
+        With a buffer the batch is drawn from resident windows and
+        ``cfg.buffer_refresh`` of them are replaced per step, so a step reads
+        that many windows rather than a whole batch, and those reads overlap
+        the step that follows. Batches drawn from one buffer are correlated to
+        the degree the refresh rate allows.
+
         Windows stay in the cache's own half precision until they reach the
-        device, and are widened there. A batch of three-panel windows is
+        device, and are widened there. A batch of four-panel windows is
         gigabytes, so casting on the host would double both the copy held in
         memory and the bytes crossing the bus, for a conversion that is exact
         either way.
         """
-        window = self.cfg.window_size
-        picks = []
-        for _ in range(self.cfg.batch_size):
-            ei = int(torch.randint(0, len(episodes), (1,), generator=gen))
-            path, target = episodes[ei]
-            t = int(target.shape[0])
-            w = min(window, t)
-            s = (0 if t <= window
-                 else int(torch.randint(0, t - window, (1,), generator=gen)))
-            picks.append((path, target, s, w))
+        if self._buffer is None:
+            picks = [self._pick(episodes, gen=gen)
+                     for _ in range(self.cfg.batch_size)]
+            items = list(self._readers.map(self._materialize, picks))
+        else:
+            self._drain()
+            slots = torch.randint(0, len(self._buffer),
+                                  (self.cfg.batch_size,), generator=gen)
+            items = [self._buffer[int(i)] for i in slots]
+            self._refill(episodes, gen=gen)
 
-        reads = list(self._readers.map(
-            lambda p: self.read_window(p[0], p[2], p[3]), picks))
-
-        fb, yb, mb = [], [], []
-        for f, (_path, target, s, w) in zip(reads, picks, strict=True):
-            y = target[s:s + w]
-            if w < window:
-                f = torch.cat([f, f.new_zeros(window - w, *f.shape[1:])])
-                y = torch.cat([y, y.new_zeros(window - w, *y.shape[1:])])
-            fb.append(f)
-            yb.append(y)
-            mb.append(torch.cat([torch.ones(w), torch.zeros(window - w)]))
+        fb, yb, mb = zip(*items, strict=True)
         return (torch.stack(fb).to(device).float(), torch.stack(yb).to(device),
                 torch.stack(mb).to(device))
 

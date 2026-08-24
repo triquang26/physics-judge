@@ -145,7 +145,7 @@ class Detector:
         ceiling, so two clips that both flag 100% of frames can still be
         told apart, and because it is threshold-relative rather than raw
         ``units``, it is comparable across detectors with different units
-        (mm vs deg vs mm/frame^3) -- e.g. ``max`` across detectors is a
+        (mm vs deg vs mm/s^3) -- e.g. ``max`` across detectors is a
         reasonable single per-clip "worst violation" scalar.
         """
         s = self.per_frame(ctx)
@@ -215,34 +215,40 @@ class RigidityDetector(Detector):
 
 
 class JerkDetector(Detector):
-    """Jitter: keypoint trajectory jerks (3rd difference) -- jerky/unstable motion."""
+    """Jitter: 3rd derivative of keypoint position.
+
+    Per second, not per frame: thresholds are calibrated on real motion at one
+    frame rate and applied to clips at another (5 to 16 fps here), so a
+    per-frame difference would rank the slowest-sampled generator as jerkiest.
+    """
 
     name = "jerk"
-    units = "mm/frame^3"
+    units = "mm/s^3"
 
     def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         T = len(P)
         out = np.zeros(T)
         if T >= 4:
-            j = P[3:] - 3 * P[2:-1] + 3 * P[1:-2] - P[:-3]     # (T-3,K,3) 3rd difference
-            jm = j.norm(dim=-1).amax(1)                        # (T-3,) worst keypoint
-            out[2:2 + len(jm)] = (jm * 1000.0).numpy()
+            j = P[3:] - 3 * P[2:-1] + 3 * P[1:-2] - P[:-3]
+            jm = j.norm(dim=-1).amax(1)
+            out[2:2 + len(jm)] = (jm * 1000.0).numpy() / (ctx.dt ** 3)
         return out
 
 
 class TeleportDetector(Detector):
-    """Teleport: worst keypoint jumps too far in one frame (position discontinuity)."""
+    """Teleport: worst keypoint speed. Per second, as :class:`JerkDetector`."""
 
     name = "teleport"
-    units = "mm/frame"
+    units = "mm/s"
 
     def per_frame(self, ctx: ClipContext) -> np.ndarray:
         P = _single_clip_P(ctx)
         T = len(P)
         out = np.zeros(T)
         if T >= 2:
-            out[1:] = ((P[1:] - P[:-1]).norm(dim=-1).amax(1) * 1000.0).numpy()
+            step = (P[1:] - P[:-1]).norm(dim=-1).amax(1) * 1000.0
+            out[1:] = step.numpy() / ctx.dt
         return out
 
 

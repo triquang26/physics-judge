@@ -150,10 +150,12 @@ def encode_clip(backbone: Any, clip_path: str, *, view_layout: ViewLayout,
     fps_arg, dt_arg:
         Mutually exclusive timebase overrides.
     frame_chunk:
-        Encode at most this many frames per call. Attention is quadratic in
-        tokens per frame, so a long episode at full resolution can exhaust a
-        large GPU in one batch. Frames are encoded independently, so chunking
-        changes memory and time, never the numbers.
+        Encode at most this many frames per call, and move only that many to
+        ``device``. Attention is quadratic in tokens per frame, so a long
+        episode at full resolution can exhaust a large GPU in one batch.
+        Frames are encoded independently, so chunking changes memory and time,
+        never the numbers. Device memory is then bounded by this rather than
+        by the clip's length.
 
     Returns
     -------
@@ -164,16 +166,14 @@ def encode_clip(backbone: Any, clip_path: str, *, view_layout: ViewLayout,
 
     clip = resolve_timebase(clip_path, fps_arg=fps_arg, dt_arg=dt_arg,
                             view_layout=view_layout)
-    frames = load_rgb(clip, max_frames=max_frames).to(device)
+    frames = load_rgb(clip, max_frames=max_frames)
+    step = frames.shape[0] if frame_chunk <= 0 else frame_chunk
     with torch.no_grad():
-        if frame_chunk and frame_chunk > 0 and frames.shape[0] > frame_chunk:
-            feat = torch.cat([backbone.encode(frames[i:i + frame_chunk])
-                              for i in range(0, frames.shape[0], frame_chunk)],
-                             dim=0)
-        else:
-            feat = backbone.encode(frames)
+        feat = torch.cat([backbone.encode(frames[i:i + step].to(device))
+                          .half().cpu()
+                          for i in range(0, frames.shape[0], step)], dim=0)
     t, v, p, d = feat.shape
-    return feat.reshape(t, v * p, d).half().cpu(), clip
+    return feat.reshape(t, v * p, d), clip
 
 
 def write_cache(out_path: str, feat: torch.Tensor, header: CacheHeader) -> None:

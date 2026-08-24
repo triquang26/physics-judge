@@ -18,7 +18,7 @@ ENV_VARS = {
     "KINESCORE_ASSETS": "URDF and mesh trees (never vendored; GR-1 alone is ~285 MB)",
     "KINESCORE_CKPT_DIR": "trained pose-reader checkpoints",
     "KINESCORE_CACHE_DIR": "precomputed backbone feature caches",
-    "KINESCORE_DATA_ROOT": "video clips to score",
+    "KINESCORE_DATA_ROOT": "bench clips, training corpora, and train trees",
     "KINESCORE_OUTPUT_DIR": "scoring outputs (defaults to ./out)",
 }
 

@@ -7,11 +7,9 @@ from kinescore.adapters.base import (
     get_adapter,
     register_adapter,
 )
-from kinescore.adapters.canonical import CanonicalTreeAdapter
-from kinescore.adapters.ctrlworld import CtrlWorldTeleopAdapter
+from kinescore.adapters.lerobot import LeRobotAdapter
 
 __all__ = [
-    "RawEpisode", "SkippedEpisode", "DatasetAdapter", "CtrlWorldTeleopAdapter",
-    "CanonicalTreeAdapter", "get_adapter", "available_adapters",
-    "register_adapter",
+    "RawEpisode", "SkippedEpisode", "DatasetAdapter", "LeRobotAdapter",
+    "get_adapter", "available_adapters", "register_adapter",
 ]

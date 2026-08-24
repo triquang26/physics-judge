@@ -73,6 +73,20 @@ class TestHead:
         assert not missing
 
 
+class _DeterministicBackbone:
+    """Tokens that depend only on the frame, and a count of encode calls."""
+
+    def __init__(self, n_views: int) -> None:
+        self.n_views = n_views
+        self.calls = 0
+
+    def encode(self, rgb: torch.Tensor) -> torch.Tensor:
+        self.calls += 1
+        per_frame = rgb.flatten(1).mean(dim=1)[:, None, None, None]
+        return per_frame.expand(rgb.shape[0], self.n_views, TOKENS_PER_VIEW,
+                                D).clone()
+
+
 class TestReader:
     def _reader(self, n_views, **kwargs) -> KeypointReader:
         layout = ViewLayout(n_views=n_views, tokens_per_view=TOKENS_PER_VIEW,
@@ -101,3 +115,38 @@ class TestReader:
         reader = self._reader(1)
         out = reader.read(torch.rand(4, 3, 24, 32))
         assert out.P.shape == (1, 4, 5, 3)
+
+    def test_chunked_read_matches_the_whole_clip(self):
+        reader = self._reader(3)
+        reader.backbone = _DeterministicBackbone(3)
+        frames = torch.randint(0, 255, (6, 192, 960, 3), dtype=torch.uint8)
+
+        whole = reader.read(frames).P
+        chunked = reader.read(frames, frame_chunk=2).P
+
+        assert torch.equal(whole, chunked)
+
+    def test_frame_chunk_bounds_what_one_encode_call_sees(self):
+        reader = self._reader(3)
+        reader.backbone = _DeterministicBackbone(3)
+        frames = torch.randint(0, 255, (6, 192, 960, 3), dtype=torch.uint8)
+
+        reader.read(frames, frame_chunk=4)
+
+        assert reader.backbone.calls == 2  # 4 + 2
+
+    def test_the_reader_carries_its_own_chunk_size(self):
+        reader = self._reader(3, frame_chunk=5)
+        reader.backbone = _DeterministicBackbone(3)
+
+        reader.read(torch.randint(0, 255, (6, 192, 960, 3),
+                                  dtype=torch.uint8))
+
+        assert reader.backbone.calls == 2  # 5 + 1
+
+    def test_a_clip_longer_than_t_max_reads_whole(self):
+        reader = self._reader(3)  # t_max is 8
+        out = reader.read(torch.randint(0, 255, (20, 192, 960, 3),
+                                        dtype=torch.uint8))
+
+        assert out.P.shape == (1, 20, 5, 3)

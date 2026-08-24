@@ -223,3 +223,139 @@ class TestLoop:
         trainer = _trainer(robot)
         episodes = trainer.load_episodes(cache_root, annotation_root, "val")
         assert trainer.evaluate(trainer.head, episodes)["keypoint_mm"] > 0
+
+
+class TestPreload:
+    @pytest.fixture(autouse=True)
+    def _room(self, monkeypatch):
+        monkeypatch.setattr("kinescore.training.trainer._available_memory",
+                            lambda: 2 * 2**30)
+
+    def test_resident_windows_equal_mapped_windows(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        episodes = trainer.load_episodes(cache_root, annotation_root, "train")
+        path, _target = episodes[0]
+        from_disk = trainer.read_window(path, 1, 3).clone()
+
+        trainer.preload(episodes)
+
+        assert torch.equal(trainer.read_window(path, 1, 3), from_disk)
+
+    def test_preload_reports_the_bytes_it_holds(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot, n_episodes=3,
+                                              n_frames=6)
+        trainer = _trainer(robot)
+        episodes = trainer.load_episodes(cache_root, annotation_root, "train")
+
+        assert trainer.preload(episodes) == 3 * 6 * TOKENS * D * 2
+
+    def test_preloading_twice_holds_each_episode_once(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot, n_episodes=3)
+        trainer = _trainer(robot)
+        episodes = trainer.load_episodes(cache_root, annotation_root, "train")
+        trainer.preload(episodes)
+
+        assert trainer.preload(episodes) == trainer.preload(episodes)
+
+    def test_fit_runs_from_memory(self, tmp_path, robot):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot, preload=True)
+        train_eps = trainer.load_episodes(cache_root, annotation_root, "train")
+        trainer.preload(train_eps)
+
+        assert trainer.fit(train_episodes=train_eps).train_mm > 0
+
+    def test_a_split_too_large_for_memory_is_refused(self, tmp_path, robot,
+                                                     monkeypatch):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot)
+        episodes = trainer.load_episodes(cache_root, annotation_root, "train")
+        monkeypatch.setattr("kinescore.training.trainer._available_memory",
+                            lambda: 1)
+
+        with pytest.raises(MemoryError, match="preloading"):
+            trainer.preload(episodes)
+
+
+class TestMemoryCeiling:
+    def test_a_cgroup_ceiling_beats_the_host_number(self, monkeypatch):
+        from kinescore.training import trainer as mod
+
+        monkeypatch.setattr(mod, "_meminfo_available", lambda: 2 * 2**40)
+        monkeypatch.setattr(mod, "_cgroup_headroom", lambda: 8 * 2**30)
+
+        assert mod._available_memory() == 8 * 2**30
+
+    def test_no_cgroup_ceiling_leaves_the_host_number(self, monkeypatch):
+        import sys
+
+        from kinescore.training import trainer as mod
+
+        monkeypatch.setattr(mod, "_meminfo_available", lambda: 64 * 2**30)
+        monkeypatch.setattr(mod, "_cgroup_headroom", lambda: sys.maxsize)
+
+        assert mod._available_memory() == 64 * 2**30
+
+
+class TestBuffer:
+    @pytest.fixture(autouse=True)
+    def _room(self, monkeypatch):
+        monkeypatch.setattr("kinescore.training.trainer._available_memory",
+                            lambda: 2 * 2**30)
+
+    def _filled(self, tmp_path, robot, **cfg):
+        cache_root, annotation_root = _corpus(tmp_path, robot, n_episodes=6)
+        trainer = _trainer(robot, **cfg)
+        episodes = trainer.load_episodes(cache_root, annotation_root, "train")
+        trainer.fill_buffer(episodes, gen=torch.Generator().manual_seed(0))
+        return trainer, episodes
+
+    def test_buffer_size_follows_the_byte_budget(self, tmp_path, robot):
+        trainer, _ = self._filled(tmp_path, robot,
+                                  buffer_bytes=8 * 4 * TOKENS * D * 2)
+
+        assert len(trainer._buffer) == 8
+
+    def test_buffer_never_holds_less_than_one_batch(self, tmp_path, robot):
+        trainer, _ = self._filled(tmp_path, robot, buffer_bytes=1)
+
+        assert len(trainer._buffer) == trainer.cfg.batch_size
+
+    def test_batches_come_out_shaped_like_unbuffered_ones(self, tmp_path, robot):
+        trainer, episodes = self._filled(
+            tmp_path, robot, buffer_bytes=8 * 4 * TOKENS * D * 2)
+        gen = torch.Generator().manual_seed(1)
+
+        feat, target, mask = trainer._sample_windows(
+            episodes, gen=gen, device=torch.device("cpu"))
+
+        assert feat.shape == (2, 4, TOKENS, D)
+        assert target.shape[:2] == (2, 4)
+        assert mask.shape == (2, 4)
+
+    def test_a_step_replaces_exactly_buffer_refresh_windows(self, tmp_path,
+                                                            robot):
+        trainer, episodes = self._filled(
+            tmp_path, robot, buffer_bytes=8 * 4 * TOKENS * D * 2,
+            buffer_refresh=3)
+        gen = torch.Generator().manual_seed(1)
+
+        trainer._sample_windows(episodes, gen=gen, device=torch.device("cpu"))
+
+        assert len(trainer._pending) == 3
+
+    def test_a_buffer_too_large_for_memory_is_refused(self, tmp_path, robot,
+                                                      monkeypatch):
+        cache_root, annotation_root = _corpus(tmp_path, robot)
+        trainer = _trainer(robot, buffer_bytes=2 * 2**30)
+        episodes = trainer.load_episodes(cache_root, annotation_root, "train")
+
+        with pytest.raises(MemoryError, match="window buffer"):
+            trainer.fill_buffer(episodes, gen=torch.Generator().manual_seed(0))
+
+    def test_fit_runs_from_a_buffer(self, tmp_path, robot):
+        trainer, episodes = self._filled(
+            tmp_path, robot, buffer_bytes=8 * 4 * TOKENS * D * 2)
+
+        assert trainer.fit(train_episodes=episodes).train_mm > 0

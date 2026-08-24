@@ -24,7 +24,8 @@ _REQUIRED_ATTRS: tuple[str, ...] = ("NAME", "HELP", "add_arguments", "run")
 
 #: ``--help`` order: the order a benchmark run goes through. A command not
 #: listed still registers, and is appended alphabetically.
-_DISPLAY_ORDER: tuple[str, ...] = ("data", "cache", "train", "score")
+_DISPLAY_ORDER: tuple[str, ...] = (
+    "pull", "data", "cache", "train", "score", "report", "readers", "models")
 
 
 def _discover_commands() -> tuple[ModuleType, ...]:

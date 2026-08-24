@@ -7,8 +7,8 @@ no per-generator tuning. The only learned input is `P` itself.
 | detector | units | flags | reads |
 |---|---|---|---|
 | `rigidity` | mm | above | bone lengths vs URDF rest lengths |
-| `jerk` | mm/frame³ | above | 3rd time difference of keypoints |
-| `teleport` | mm/frame | above | 1st time difference of keypoints |
+| `jerk` | mm/s³ | above | 3rd time difference of keypoints |
+| `teleport` | mm/s | above | 1st time difference of keypoints |
 | `joint_limit` | deg | above | bend angles vs a GT-fitted envelope |
 | `self_collision` | mm (min dist) | **below** | closest non-adjacent keypoint pair |
 
@@ -79,16 +79,20 @@ or a warp that happens to preserve every bone length.
 ## jerk
 
 Third difference `P[t] - 3P[t-1] + 3P[t-2] - P[t-3]`, norm per keypoint, worst
-keypoint per frame, in mm/frame³. The first two and last frame are zero. Clips
-shorter than 4 frames score all-zero.
+keypoint per frame, divided by `dt³` to give mm/s³. The first two and last frame
+are zero. Clips shorter than 4 frames score all-zero.
+
+Per second, not per frame: thresholds are calibrated on real motion at one frame
+rate and applied to clips at another — 5 to 16 fps across this bench — so a
+per-frame difference would rank the slowest-sampled generator as the jerkiest.
 
 **Does not detect:** smooth but impossible motion. A trajectory can be perfectly
 smooth and still violate the robot's dynamics.
 
 ## teleport
 
-First difference, norm per keypoint, worst keypoint per frame, in mm/frame.
-Frame 0 is zero.
+First difference, norm per keypoint, worst keypoint per frame, divided by `dt`
+to give mm/s. Frame 0 is zero.
 
 Overlaps with `jerk` by construction — a teleport also produces high jerk — but
 separates a single discontinuity (one frame, high teleport) from sustained

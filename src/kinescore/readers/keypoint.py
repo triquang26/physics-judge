@@ -8,6 +8,10 @@ path, so no URDF, no joint limits and no forward kinematics at read time.
 
 The robot is named, not loaded: ``robot_name`` says which base frame the
 points live in.
+
+A clip is read in windows of the head's ``t_max`` rather than whole, so a clip
+longer than the positional table still reads; temporal context spans a window,
+not the clip.
 """
 from __future__ import annotations
 
@@ -45,6 +49,13 @@ class KeypointReader:
     use_context:
         ``False`` reads each frame independently, bypassing the head's
         temporal stage.
+    frame_chunk:
+        Frames encoded per backbone call (``0`` = the whole clip at once).
+        Attention is quadratic in tokens per frame, so a long clip at full
+        resolution can exhaust the device in one batch. Frames are encoded
+        independently, so chunking changes memory and time, never the numbers.
+        Only a chunk is moved to the head's device, so device memory is bounded
+        by this rather than by the clip's length.
     """
 
     backbone: FeatureBackbone
@@ -53,17 +64,28 @@ class KeypointReader:
     robot_name: str
     reader_id: str
     use_context: bool = True
+    frame_chunk: int = 0
 
     @property
     def n_keypoints(self) -> int:
         return self.head.n_keypoints
 
-    def read(self, frames: torch.Tensor) -> Readout:
+    def read(self, frames: torch.Tensor, *, frame_chunk: int | None = None
+             ) -> Readout:
         """``(T,H,W,3)`` uint8 or ``(B,T,3,H,W)`` float in ``[0,1]`` -> Readout."""
         rgb, b, t = normalize_frames(frames)
-        feat = self.backbone.encode(rgb)          # (B*T, V, P, D)
+        step = self.frame_chunk if frame_chunk is None else frame_chunk
+        step = rgb.shape[0] if step <= 0 else step
+        device = next(self.head.parameters()).device
+        feat = torch.cat([self.backbone.encode(rgb[i:i + step].to(device))
+                          .half().cpu()
+                          for i in range(0, rgb.shape[0], step)])  # (B*T,V,P,D)
         _, v, p, d = feat.shape
         self.view_layout.assert_tokens(v * p)
-        feat = feat.reshape(b, t, v * p, d).float()
-        points = self.head(feat, use_context=self.use_context)
+        feat = feat.reshape(b, t, v * p, d)
+        window = max(1, self.head.t_max)
+        points = torch.cat(
+            [self.head(feat[:, i:i + window].to(device).float(),
+                       use_context=self.use_context)
+             for i in range(0, t, window)], dim=1)
         return Readout(P=points)

@@ -1,12 +1,14 @@
 # Training a reader
 
-A reader is one trained `KeypointHead`, identified as `<robot>.<view_id>`. It is
-fitted in two commands: encode the canonical tree into frozen backbone tokens,
-then fit the head against forward-kinematics targets.
+A reader is one trained `KeypointHead`, identified as
+`<robot>.<corpus>.<view_id>`. It is fitted in two commands: encode the canonical
+tree into frozen backbone tokens, then fit the head against forward-kinematics
+targets. `kinescore readers --ids` lists every id.
 
 ```bash
-kinescore cache --reader franka_panda.mv3_row --device cuda
-kinescore train --reader franka_panda.mv3_row --device cuda
+R=franka_panda.single_arm_mv.mv3_row
+kinescore cache --reader $R --device cuda
+kinescore train --reader $R --device cuda
 ```
 
 ## Stage 1 — cache

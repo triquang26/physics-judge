@@ -20,8 +20,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--lr-late", type=float, default=5e-4)
     parser.add_argument("--lr-step-at", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--read-workers", type=int, default=4,
+    parser.add_argument("--read-workers", type=int, default=16,
                         help="threads reading token windows for one batch")
+    parser.add_argument("--preload", action="store_true",
+                        help="hold the split's tokens in RAM instead of "
+                             "reading windows from disk each step")
+    parser.add_argument("--buffer-gb", type=float, default=0.0,
+                        help="RAM for a resident pool of sampled windows "
+                             "(0 = read every batch from storage)")
+    parser.add_argument("--buffer-refresh", type=int, default=4,
+                        help="windows replaced per step while a buffer is in "
+                             "use")
     parser.add_argument("--eval-every", type=int, default=500)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--device", default="cuda")
@@ -57,10 +66,13 @@ def run(args: argparse.Namespace) -> int:
     import dataclasses
     import json
 
+    import torch
+
     from kinescore.cli._shared import load, now, resolve_reader
     from kinescore.heads.keypoint import KeypointHead
     from kinescore.readers.checkpoint import save_reader
     from kinescore.registry.provenance import (
+        git_state,
         run_manifest,
         sha256_file,
         write_run_manifest,
@@ -89,7 +101,7 @@ def run(args: argparse.Namespace) -> int:
                 f"`kinescore cache --reader {reader.reader_id}` to finish it, "
                 f"or pass --allow-partial-cache to train on what exists")
 
-    started = now()
+    started, git = now(), git_state()
     robot = get_robot(reader.robot)
     declared = registry.robots[reader.robot].get("keypoints")
     n_keypoints = KeypointTrainer.n_keypoints(robot)
@@ -104,7 +116,9 @@ def run(args: argparse.Namespace) -> int:
         steps=args.steps, batch_size=args.batch_size,
         window_size=args.window_size, lr=args.lr, lr_late=args.lr_late,
         lr_step_at=args.lr_step_at, seed=args.seed,
-        read_workers=args.read_workers,
+        read_workers=args.read_workers, preload=args.preload,
+        buffer_bytes=int(args.buffer_gb * 2**30),
+        buffer_refresh=args.buffer_refresh,
         eval_every=args.eval_every, log_every=args.log_every,
         device=args.device)
     trainer = KeypointTrainer(head, robot, reader_id=reader.reader_id,
@@ -121,6 +135,15 @@ def run(args: argparse.Namespace) -> int:
     except RuntimeError:
         val_episodes = None
         print("[train] no val split cached; training without validation")
+
+    if cfg.preload:
+        for split in (train_episodes, val_episodes):
+            if split:
+                trainer.preload(split, progress=lambda m: print(f"[train] {m}"))
+    if cfg.buffer_bytes:
+        trainer.fill_buffer(train_episodes,
+                            gen=torch.Generator().manual_seed(cfg.seed),
+                            progress=lambda m: print(f"[train] {m}"))
 
     result = trainer.fit(
         train_episodes=train_episodes, val_episodes=val_episodes,
@@ -151,5 +174,5 @@ def run(args: argparse.Namespace) -> int:
     }
     print(f"[train] {json.dumps({k: v for k, v in summary.items() if k != 'config'})}")
     write_run_manifest(cache_dir, run_manifest(
-        NAME, started_at=started, sources=registry.sources, extra=summary))
+        NAME, started_at=started, git=git, sources=registry.sources, extra=summary))
     return 0

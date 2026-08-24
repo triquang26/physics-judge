@@ -5,16 +5,17 @@ physics violations against thresholds calibrated on real motion.
 
 ```bash
 kinescore score --list                                    # cells and their status
-kinescore score --cell single_arm.mv3_row.ctrlworld
+kinescore score --cell single_arm.mv3_row.ctrlworld       # the bench's own clips
 kinescore score --cell single_arm.mv3_row.ctrlworld \
     --videos /path/to/generated --out /path/to/report --percentile 95
+kinescore report --by role --out out/report.json          # every scored cell
 ```
 
 | flag | default | meaning |
 |---|---|---|
 | `--cell` | — | cell id |
 | `--list` | — | print every declared cell and its status |
-| `--videos` | the cell's score tree | directory searched recursively for `*.mp4` |
+| `--videos` | the clips `bench/manifest.json` assigns to this cell | directory searched recursively for `*.mp4` |
 | `--checkpoint` | the reader's own | reader checkpoint to score through |
 | `--out` | the cell's own | output directory |
 | `--calibration-clips` | `24` | real clips the thresholds are fitted on |
@@ -27,13 +28,14 @@ kinescore score --cell single_arm.mv3_row.ctrlworld \
 
 `<embodiment>.<view_id>.<model>` — one scored unit. It names the robot, the view
 packing, and the generator whose output is being judged. It resolves to exactly
-one reader (`<robot>.<view_id>`), so several cells comparing different generators
-on the same robot and packing are judged by the same head, and the comparison is
-between generators rather than between readers.
+one reader (`<robot>.<corpus>.<view_id>`), so several cells comparing different
+generators on the same robot and packing are judged by the same head, and the
+comparison is between generators rather than between readers.
 
-`method` (`dense` / `augment` / `worldcache`) and `split` (`makovian` /
-`non_makovian`) are sub-partitions inside a cell. They live in the clip paths, not
-in separate cells.
+`method` (`dense` / `augment` / `worldcache`), `role` (`dense` / `fast` /
+`weak_augment` / `strong_augment`) and `split` (`makovian` / `non_makovian`) are
+sub-partitions inside a cell. They come from `bench/manifest.json`, are carried
+into every scored record, and are what `kinescore report --by` groups on.
 
 A cell inherits its reader's `status`: a blocked reader blocks every cell that
 names it, and `--list` shows why.
@@ -47,7 +49,8 @@ names it, and `--list` shows why.
    own `videos/val/` and fit every detector's threshold at `--percentile` of
    pooled real per-frame scores. If there are none, the run stops and tells you
    to materialise the reader's tree first.
-4. Score each clip in `--videos` into per-type reports.
+4. Select the cell's clips from `bench/manifest.json`, unless `--videos`
+   overrides, and score each into per-type reports.
 5. Write `results.jsonl`, `summary.json`, `run_manifest.json`.
 
 Calibration comes from the reader's *validation* split — real motion the head was
@@ -74,7 +77,8 @@ is worse will have looser thresholds.
 `results.jsonl`, one line per clip:
 
 ```json
-{"path": "...", "cell_id": "single_arm.mv3_row.ctrlworld",
+{"path": "...", "cell_id": "single_arm.mv3_row.ctrlworld", "id": "00317",
+ "method": "dense", "role": "dense", "split": "makovian", "task": "...",
  "violations": {"rigidity": {...}, "jerk": {...}, "teleport": {...},
                 "joint_limit": {...}, "self_collision": {...}}}
 ```
@@ -91,6 +95,19 @@ silently dropped.
 the video root, clip counts, the calibration percentile, and the fitted
 thresholds. `run_manifest.json` adds the config sources. Two runs are comparable
 only if these agree, and the files make that checkable rather than assumed.
+
+## The report table
+
+`kinescore report` reads every cell's `results.jsonl` and prints, per cell and
+per sub-partition, the fraction of clips with at least one flagged interval per
+detector. A cell that has not been scored is printed as `not scored` rather than
+omitted. `--out` writes the same table as JSON.
+
+```bash
+kinescore report --by role      # dense / fast / weak_augment / strong_augment
+kinescore report --by method    # dense / augment / worldcache
+kinescore report --by split     # makovian / non_makovian
+```
 
 ## Scope
 

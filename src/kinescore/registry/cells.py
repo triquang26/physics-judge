@@ -1,8 +1,9 @@
 """``cell_id -> everything a run needs``, read from ``configs/cells.yaml``.
 
-A **reader** is one trained head, keyed by ``<robot>.<view_id>``: two corpora
-seen through the same packing of the same robot share it, because a generator
-changes what the pixels look like, not what a joint is.
+A **reader** is one trained head, keyed by ``<robot>.<corpus>.<view_id>``: all
+three change the weights. The robot follows from the corpus and is written
+anyway, so swapping one without the other fails here rather than training
+against the wrong forward kinematics.
 
 A **cell** is one scored unit, keyed by ``<embodiment>.<view_id>.<model>``. It
 names a reader and the clips it selects. ``method`` and ``split`` partition
@@ -62,17 +63,27 @@ class TrainSource:
 
     Attributes
     ----------
+    corpus:
+        Short name of the corpus, and the middle field of the reader id.
     adapter:
         Adapter id, resolved through :mod:`kinescore.adapters`.
     root:
         Corpus root, with ``${KINESCORE_*}`` already expanded.
+    cameras:
+        Source camera keys, in the order they become panels. Declared, not
+        discovered: alphabetical order is not panel order. An entry may list
+        alternatives as ``a|b``, for a corpus that names one viewpoint two
+        ways.
     joint_field:
         Key in the source's own metadata holding the joint array.
     joint_columns:
         Which of that array's columns are the robot's joints, in the robot's
         canonical order. Empty means every column, in order.
     gripper_column:
-        Column holding gripper opening, or ``None``.
+        Column of ``joint_field`` holding gripper opening, or ``None``.
+    gripper_field:
+        A separate field holding gripper opening, for corpora that store it
+        outside ``joint_field``. Ignored when ``gripper_column`` is set.
     scene_key:
         How an episode's scene is derived for the scene-disjoint split.
         ``"prefix"`` takes the episode id up to its last ``__``, the
@@ -83,11 +94,14 @@ class TrainSource:
         disjointness.
     """
 
+    corpus: str
     adapter: str
     root: str
-    joint_field: str = "states"
+    cameras: tuple[str, ...] = ()
+    joint_field: str = "observation.state"
     joint_columns: tuple[int, ...] = ()
     gripper_column: int | None = None
+    gripper_field: str = ""
     scene_key: str = "prefix"
 
     def __post_init__(self) -> None:
@@ -95,6 +109,8 @@ class TrainSource:
             raise ValueError(
                 f"scene_key must be one of {sorted(SCENE_KEY_MODES)}, got "
                 f"{self.scene_key!r}")
+        if len(set(self.cameras)) != len(self.cameras):
+            raise ValueError(f"cameras repeat a key: {list(self.cameras)}")
 
 
 @dataclass(frozen=True)
@@ -104,7 +120,7 @@ class ReaderSpec:
     Attributes
     ----------
     reader_id:
-        ``<robot>.<view_id>``.
+        ``<robot>.<corpus>.<view_id>``.
     robot:
         Robot name, resolved through :func:`kinescore.robots.get_robot`.
     view:
@@ -122,6 +138,11 @@ class ReaderSpec:
     status: str = ""
 
     @property
+    def corpus(self) -> str:
+        """The corpus this head is trained on, or ``""`` when it has none."""
+        return self.train.corpus if self.train is not None else ""
+
+    @property
     def trainable(self) -> bool:
         return self.train is not None and not self.status
 
@@ -137,8 +158,8 @@ class ReaderSpec:
 
     @property
     def train_tree(self) -> Path:
-        """``$KINESCORE_DATA_ROOT/train/<reader_id>``, the canonical train tree."""
-        return env_path("KINESCORE_DATA_ROOT") / "train" / self.reader_id
+        """``$KINESCORE_DATA_ROOT/trees/<reader_id>``, rebuilt by ``data``."""
+        return env_path("KINESCORE_DATA_ROOT") / "trees" / self.reader_id
 
 
 @dataclass(frozen=True)
@@ -179,11 +200,6 @@ class CellSpec:
     @property
     def scorable(self) -> bool:
         return not self.status
-
-    @property
-    def score_tree(self) -> Path:
-        """``$KINESCORE_DATA_ROOT/canonical/<cell_id>``."""
-        return env_path("KINESCORE_DATA_ROOT") / "canonical" / self.cell_id
 
     @property
     def output_dir(self) -> Path:
@@ -235,18 +251,22 @@ class Registry:
 
 
 def _train_from_entry(reader_id: str, entry: dict[str, Any]) -> TrainSource:
-    unknown = set(entry) - {"adapter", "root", "joint_field", "joint_columns",
-                            "gripper_column", "scene_key"}
+    unknown = set(entry) - {"corpus", "adapter", "root", "cameras",
+                            "joint_field", "joint_columns", "gripper_column",
+                            "gripper_field", "scene_key"}
     if unknown:
         raise ValueError(
             f"reader {reader_id!r}: unknown train key(s) {sorted(unknown)}")
     return TrainSource(
+        corpus=str(entry["corpus"]),
         adapter=str(entry["adapter"]),
         root=_expand(str(entry["root"])),
-        joint_field=str(entry.get("joint_field", "states")),
+        cameras=tuple(str(c) for c in entry.get("cameras", ())),
+        joint_field=str(entry.get("joint_field", "observation.state")),
         joint_columns=tuple(int(i) for i in entry.get("joint_columns", ())),
         gripper_column=(None if entry.get("gripper_column") is None
                         else int(entry["gripper_column"])),
+        gripper_field=str(entry.get("gripper_field", "")),
         scene_key=str(entry.get("scene_key", "prefix")),
     )
 
@@ -254,7 +274,7 @@ def _train_from_entry(reader_id: str, entry: dict[str, Any]) -> TrainSource:
 def _reader_from_entry(reader_id: str, entry: dict[str, Any],
                        views: dict[str, ViewSpec],
                        robots: dict[str, dict[str, Any]]) -> ReaderSpec:
-    unknown = set(entry) - {"robot", "view", "train", "status"}
+    unknown = set(entry) - {"robot", "view", "corpus", "train", "status"}
     if unknown:
         raise ValueError(
             f"reader {reader_id!r}: unknown key(s) {sorted(unknown)}")
@@ -268,15 +288,21 @@ def _reader_from_entry(reader_id: str, entry: dict[str, Any],
         raise ValueError(
             f"reader {reader_id!r} names view {view_id!r}, which views.yaml "
             f"does not declare: {sorted(views)}")
-    expected_id = f"{robot}.{view_id}"
+    train_entry = entry.get("train")
+    train = (None if train_entry is None
+             else _train_from_entry(reader_id, train_entry))
+    corpus = train.corpus if train is not None else str(entry.get("corpus", ""))
+    if not corpus:
+        raise ValueError(
+            f"reader {reader_id!r} names no corpus; a reader with no train "
+            f"source still needs `corpus:` so its id can be checked")
+    expected_id = f"{robot}.{corpus}.{view_id}"
     if reader_id != expected_id:
         raise ValueError(
-            f"reader id {reader_id!r} must be <robot>.<view_id>, i.e. "
+            f"reader id {reader_id!r} must be <robot>.<corpus>.<view_id>, i.e. "
             f"{expected_id!r}")
-    train = entry.get("train")
     return ReaderSpec(
-        reader_id=reader_id, robot=robot, view=views[view_id],
-        train=None if train is None else _train_from_entry(reader_id, train),
+        reader_id=reader_id, robot=robot, view=views[view_id], train=train,
         status=str(entry.get("status", "")),
     )
 

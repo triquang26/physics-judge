@@ -1,146 +1,164 @@
-# readers: one trained head per (robot, view). Two cells that see the same robot
-#          through the same packing share a reader; the generator that produced
-#          the pixels does not change what a joint looks like.
-# cells:   one scored unit, cell_id = <embodiment>.<view_id>.<model>. `method`
-#          (dense/augment/worldcache) and `split` (makovian/non_makovian)
-#          partition clips inside a cell: neither changes robot, packing or
-#          reader, so both are reported as sub-partitions rather than as cells.
-#
-# Packing is measured, never inferred from a name: ctrlworld_4view_grid is four
-# 320x192 panels in a row (seams at x=320/640/960, 15-55x the median column
-# difference), not a 2x2 grid.
+# reader = one trained head, <robot>.<corpus>.<view>.
+# cell   = one scored unit, <embodiment>.<view>.<model>.
+# method (dense/augment/worldcache), role and split partition a cell's clips.
+
+_corpus: &bimanual_mv
+  corpus: bimanual_mv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/bimanual/multiview
+  cameras: [cam_high, cam_low, cam_left_wrist, cam_right_wrist]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
+  gripper_column: 6
+
+_corpus_bimanual_sv: &bimanual_sv
+  corpus: bimanual_sv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/bimanual/singleview
+  cameras: [cam_high]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
+  gripper_column: 6
+
+_corpus_humanoid_mv: &humanoid_mv
+  corpus: humanoid_mv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/humanoid/multiview
+  cameras: ["cam_head_rgb|cam_high_rgb", "cam_front_rgb|cam_third_view",
+            cam_left_wrist_rgb, cam_right_wrist_rgb]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+_corpus_humanoid_sv: &humanoid_sv
+  corpus: humanoid_sv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/humanoid/singleview
+  cameras: [ego_view_freq20]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5, 6, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43]
+  scene_key: episode
+
+_corpus_single_arm_mv: &single_arm_mv
+  corpus: single_arm_mv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/single_arm/multiview
+  cameras: [exterior_1_left, exterior_2_left, wrist_left]
+  joint_field: observation.state.joint_position
+  joint_columns: [0, 1, 2, 3, 4, 5, 6]
+  gripper_field: observation.state.gripper_position
+  scene_key: episode
+
+_corpus_single_arm_sv1: &single_arm_sv1
+  corpus: single_arm_mv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/single_arm/multiview
+  cameras: [exterior_1_left]
+  joint_field: observation.state.joint_position
+  joint_columns: [0, 1, 2, 3, 4, 5, 6]
+  gripper_field: observation.state.gripper_position
+  scene_key: episode
 
 readers:
-  aloha_bimanual.mv3_row:
-    robot: aloha_bimanual
-    view: mv3_row
-    train:
-      adapter: ctrlworld_teleop
-      root: ${KINESCORE_DATA_ROOT}/video_gen_physics/dense/bimanual/input/multiview/ctrlworld
-      joint_field: states
-      joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
-
-  aloha_bimanual.mv4_row:
+  aloha_bimanual.bimanual_mv.mv4_row:
     robot: aloha_bimanual
     view: mv4_row
-    train:
-      adapter: ctrlworld_teleop
-      root: ${KINESCORE_DATA_ROOT}/video_gen_physics/dense/bimanual/input/multiview/ctrlworld_4view_grid
-      joint_field: states
-      joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
+    train: *bimanual_mv
 
-  aloha_bimanual.mv4_grid:
+  aloha_bimanual.bimanual_mv.mv4_grid:
     robot: aloha_bimanual
     view: mv4_grid
-    status: "blocked: dreamgen conditions on a still frame and logs no state"
+    train: *bimanual_mv
 
-  aloha_bimanual.sv1:
+  aloha_bimanual.bimanual_sv.sv1_16x9:
     robot: aloha_bimanual
-    view: sv1
-    train:
-      adapter: canonical
-      root: ${KINESCORE_DATA_ROOT}/train/aloha_bimanual_singleview
+    view: sv1_16x9
+    train: *bimanual_sv
 
-  airbot_mmk2.mv3_row:
-    robot: airbot_mmk2
-    view: mv3_row
-    train:
-      adapter: ctrlworld_teleop
-      root: ${KINESCORE_DATA_ROOT}/video_gen_physics/dense/humanoid/input/multiview/ctrlworld
-      joint_field: states
-      joint_columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+  aloha_bimanual.bimanual_sv.sv1_4x3:
+    robot: aloha_bimanual
+    view: sv1_4x3
+    train: *bimanual_sv
 
-  airbot_mmk2.mv4_row:
+  airbot_mmk2.humanoid_mv.mv4_row:
     robot: airbot_mmk2
     view: mv4_row
-    train:
-      adapter: ctrlworld_teleop
-      root: ${KINESCORE_DATA_ROOT}/video_gen_physics/dense/humanoid/input/multiview/ctrlworld_4view_grid
-      joint_field: states
-      joint_columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    train: *humanoid_mv
 
-  airbot_mmk2.mv4_grid:
+  airbot_mmk2.humanoid_mv.mv4_grid:
     robot: airbot_mmk2
     view: mv4_grid
-    status: "blocked: dreamgen conditions on a still frame and logs no state"
+    train: *humanoid_mv
 
-  fourier_gr1.sv1:
+  fourier_gr1.humanoid_sv.sv1_16x9:
     robot: fourier_gr1
-    view: sv1
-    train:
-      adapter: canonical
-      root: ${KINESCORE_DATA_ROOT}/train/fourier_gr1_singleview
-      # This corpus names episodes <partition>__<index>, and its provenance
-      # carries the same two values as its task, so the id prefix groups all
-      # 260 episodes into 2 scenes. Splitting whole scenes off that key sends
-      # half the corpus to val; every episode is its own scene instead.
-      scene_key: episode
+    view: sv1_16x9
+    train: *humanoid_sv
 
-  franka_panda.mv3_row:
+  fourier_gr1.humanoid_sv.sv1_4x3:
+    robot: fourier_gr1
+    view: sv1_4x3
+    train: *humanoid_sv
+
+  franka_panda.single_arm_mv.mv3_row:
     robot: franka_panda
     view: mv3_row
-    train:
-      adapter: ctrlworld_teleop
-      root: ${KINESCORE_DATA_ROOT}/video_gen_physics/dense/single_arm/input/multiview/ctrlworld
-      joint_field: joints
-      joint_columns: [0, 1, 2, 3, 4, 5, 6]
-      gripper_column: 7
+    train: *single_arm_mv
 
-  franka_panda.mv4_grid_br_blank:
+  franka_panda.single_arm_mv.mv4_grid_br_blank:
     robot: franka_panda
     view: mv4_grid_br_blank
-    status: "blocked: dreamgen conditions on a still frame and logs no state"
+    train: *single_arm_mv
 
-  franka_panda.sv1:
+  franka_panda.single_arm_mv.sv1_4x3:
     robot: franka_panda
-    view: sv1
-    status: "blocked: no single-view Franka teleop corpus on this machine"
+    view: sv1_4x3
+    train: *single_arm_sv1
 
 cells:
   bimanual.mv4_row.ctrlworld_4view_grid:
-    reader: aloha_bimanual.mv4_row
+    reader: aloha_bimanual.bimanual_mv.mv4_row
     select: {embodiment: bimanual, view: multiview, model: ctrlworld_4view_grid}
 
   bimanual.mv4_grid.dreamgen:
-    reader: aloha_bimanual.mv4_grid
+    reader: aloha_bimanual.bimanual_mv.mv4_grid
     select: {embodiment: bimanual, view: multiview, model: dreamgen}
 
-  bimanual.sv1.dreamgen:
-    reader: aloha_bimanual.sv1
+  bimanual.sv1_16x9.dreamgen:
+    reader: aloha_bimanual.bimanual_sv.sv1_16x9
     select: {embodiment: bimanual, view: singleview, model: dreamgen}
 
-  bimanual.sv1.dreamdojo:
-    reader: aloha_bimanual.sv1
+  bimanual.sv1_4x3.dreamdojo:
+    reader: aloha_bimanual.bimanual_sv.sv1_4x3
     select: {embodiment: bimanual, view: singleview, model: dreamdojo}
 
   humanoid.mv4_row.ctrlworld_4view_grid:
-    reader: airbot_mmk2.mv4_row
+    reader: airbot_mmk2.humanoid_mv.mv4_row
     select: {embodiment: humanoid, view: multiview, model: ctrlworld_4view_grid}
 
   humanoid.mv4_grid.dreamgen:
-    reader: airbot_mmk2.mv4_grid
+    reader: airbot_mmk2.humanoid_mv.mv4_grid
     select: {embodiment: humanoid, view: multiview, model: dreamgen}
 
-  humanoid.sv1.dreamgen:
-    reader: fourier_gr1.sv1
+  humanoid.sv1_16x9.dreamgen:
+    reader: fourier_gr1.humanoid_sv.sv1_16x9
     select: {embodiment: humanoid, view: singleview, model: dreamgen}
 
-  humanoid.sv1.dreamdojo:
-    reader: fourier_gr1.sv1
+  humanoid.sv1_4x3.dreamdojo:
+    reader: fourier_gr1.humanoid_sv.sv1_4x3
     select: {embodiment: humanoid, view: singleview, model: dreamdojo}
 
   single_arm.mv3_row.ctrlworld:
-    reader: franka_panda.mv3_row
+    reader: franka_panda.single_arm_mv.mv3_row
     select: {embodiment: single_arm, view: multiview, model: ctrlworld}
 
   single_arm.mv4_grid_br_blank.dreamgen:
-    reader: franka_panda.mv4_grid_br_blank
+    reader: franka_panda.single_arm_mv.mv4_grid_br_blank
     select: {embodiment: single_arm, view: multiview, model: dreamgen}
 
-  single_arm.sv1.dreamgen:
-    reader: franka_panda.sv1
+  single_arm.sv1_4x3.dreamgen:
+    reader: franka_panda.single_arm_mv.sv1_4x3
     select: {embodiment: single_arm, view: singleview, model: dreamgen}
 
-  single_arm.sv1.dreamdojo:
-    reader: franka_panda.sv1
+  single_arm.sv1_4x3.dreamdojo:
+    reader: franka_panda.single_arm_mv.sv1_4x3
     select: {embodiment: single_arm, view: singleview, model: dreamdojo}

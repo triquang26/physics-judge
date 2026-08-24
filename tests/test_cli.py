@@ -1,9 +1,9 @@
 """``kinescore.cli.main``: every command on disk is reachable, and reachable once.
 
 The parser is built by importing ``cli/cmd_*.py`` rather than from a list, so
-these pin the contract that discovery relies on: the four stages a benchmark
-run goes through are present, each exposes the attributes discovery requires,
-and the tree builds without a backbone, a GPU or a corpus.
+these pin the contract that discovery relies on: the stages a benchmark run
+goes through are present, each exposes the attributes discovery requires, and
+the tree builds without a backbone, a GPU or a corpus.
 """
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ import pytest
 
 from kinescore.cli.main import _discover_commands, build_parser, main
 
-STAGES = ("data", "cache", "train", "score")
+STAGES = ("pull", "data", "cache", "train", "score", "report")
+QUERIES = ("readers", "models")
 
 
 def _commands():
@@ -19,21 +20,21 @@ def _commands():
 
 
 class TestDiscovery:
-    def test_the_four_stages_are_registered(self):
-        assert set(_commands()) == set(STAGES)
+    def test_every_stage_is_registered(self):
+        assert set(_commands()) == set(STAGES + QUERIES)
 
     def test_help_order_follows_the_pipeline(self):
-        # data -> cache -> train -> score is the order a run goes through, and
-        # the order --help must list, so the listing reads as instructions.
-        assert [m.NAME for m in _discover_commands()] == list(STAGES)
+        # pull -> ... -> report is the order a run goes through, and the order
+        # --help must list, so the listing reads as instructions.
+        assert [m.NAME for m in _discover_commands()] == list(STAGES + QUERIES)
 
-    @pytest.mark.parametrize("name", STAGES)
+    @pytest.mark.parametrize("name", STAGES + QUERIES)
     def test_command_exposes_what_discovery_requires(self, name):
         module = _commands()[name]
         for attr in ("NAME", "HELP", "add_arguments", "run"):
             assert hasattr(module, attr), f"{name} is missing {attr}"
 
-    @pytest.mark.parametrize("name", STAGES)
+    @pytest.mark.parametrize("name", STAGES + QUERIES)
     def test_command_help_is_a_sentence_not_a_placeholder(self, name):
         help_text = _commands()[name].HELP
         assert help_text and help_text[0].islower() and len(help_text) > 10
@@ -47,7 +48,7 @@ class TestParser:
     def test_tree_builds_without_a_corpus(self):
         assert build_parser().prog == "kinescore"
 
-    @pytest.mark.parametrize("name", STAGES)
+    @pytest.mark.parametrize("name", STAGES + QUERIES)
     def test_every_stage_parses_and_binds_its_runner(self, name):
         args = build_parser().parse_args([name] + _required_args(name))
         assert args._run is _commands()[name].run
@@ -110,7 +111,8 @@ class TestScorePreconditions:
         with pytest.raises(SystemExit) as e:
             cmd_score.run(self._args())
 
-        assert "kinescore train --reader franka_panda.mv3_row" in str(e.value)
+        assert ("kinescore train --reader "
+                "franka_panda.single_arm_mv.mv3_row") in str(e.value)
 
     def test_a_missing_checkpoint_is_reported_before_anything_is_built(
             self, tmp_path):

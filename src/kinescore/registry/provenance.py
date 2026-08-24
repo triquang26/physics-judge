@@ -1,10 +1,7 @@
 """``run_manifest.json``: what produced an artifact.
 
-Written by every command, next to whatever it wrote. Five checkpoints on this
-machine carry identical configuration and no record of the run that made them,
-so no number can be attributed to one rather than another. The hashes below are
-what makes that attributable: the config files a run read, and the checkpoint it
-read or wrote.
+Written by every command, next to whatever it wrote: the config files the run
+read, the checkpoint it read or wrote, and the revision it ran at.
 """
 from __future__ import annotations
 
@@ -19,7 +16,7 @@ from typing import Any
 
 from kinescore import __version__
 
-__all__ = ["sha256_file", "run_manifest", "write_run_manifest"]
+__all__ = ["sha256_file", "git_state", "run_manifest", "write_run_manifest"]
 
 #: Bytes hashed per read.
 _CHUNK = 1 << 20
@@ -46,28 +43,26 @@ def _git(*args: str) -> str:
         return ""
 
 
+def git_state() -> dict[str, Any]:
+    """The working tree's revision, read now."""
+    return {"git_sha": _git("rev-parse", "HEAD"),
+            "git_dirty": bool(_git("status", "--porcelain"))}
+
+
 def run_manifest(command: str, *, started_at: str, sources: tuple[str, ...] = (),
+                 git: dict[str, Any] | None = None,
                  extra: dict[str, Any] | None = None) -> dict[str, Any]:
     """Assemble the record for one command invocation.
 
-    Parameters
-    ----------
-    command:
-        Subcommand name.
-    started_at:
-        ISO timestamp from the caller, which owns the clock.
-    sources:
-        Config files the run read; each is hashed.
-    extra:
-        Command-specific fields -- reader id, cell id, checkpoint hash.
+    ``git`` is the revision captured when the run started. Read at write time
+    instead, a run that outlives a commit records the commit it did not run.
     """
     return {
         "command": command,
         "argv": list(sys.argv),
         "started_at": started_at,
         "kinescore_version": __version__,
-        "git_sha": _git("rev-parse", "HEAD"),
-        "git_dirty": bool(_git("status", "--porcelain")),
+        **(git if git is not None else git_state()),
         "host": platform.node(),
         "config_sha256": {os.path.basename(s): sha256_file(s) for s in sources},
         **(extra or {}),

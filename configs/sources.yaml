@@ -1,0 +1,17 @@
+# `kinescore pull` reads only this file.
+#
+# `include` is a whitelist. vgp_datasets also ships twelve `*_dreamgen*`
+# directories in {metas, t5_xxl, videos} shape: those train the video
+# generators, carry no robot state, and cannot supervise a keypoint head.
+
+sources:
+  bench:
+    repo: doanh25032004/video_gen_physics
+    include: ["data_for_web/*"]
+    strip_prefix: data_for_web
+    dest: bench
+
+  train:
+    repo: doanh25032004/vgp_datasets
+    include: ["bimanual/*", "humanoid/*", "single_arm/*"]
+    dest: corpus

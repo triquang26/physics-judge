@@ -30,7 +30,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> int:
     from kinescore.backbones.default import build_backbone
     from kinescore.cli._shared import load, now, resolve_reader
-    from kinescore.registry.provenance import run_manifest, write_run_manifest
+    from kinescore.registry.provenance import (
+        git_state,
+        run_manifest,
+        write_run_manifest,
+    )
     from kinescore.training.cache import CacheBuilder
 
     registry = load(args)
@@ -41,7 +45,7 @@ def run(args: argparse.Namespace) -> int:
             f"no train tree at {tree} -- run `kinescore data --reader "
             f"{reader.reader_id}` first")
 
-    started = now()
+    started, git = now(), git_state()
     layout = reader.view.layout()
     backbone = build_backbone(layout, device=args.device)
     builder = CacheBuilder(backbone, layout, reader.reader_id)
@@ -57,7 +61,7 @@ def run(args: argparse.Namespace) -> int:
             progress=lambda m: print(f"[cache] {m}"))
 
     write_run_manifest(reader.cache_dir, run_manifest(
-        NAME, started_at=started, sources=registry.sources,
+        NAME, started_at=started, git=git, sources=registry.sources,
         extra={"reader_id": reader.reader_id, "device": args.device,
                "splits": totals}))
     return 0

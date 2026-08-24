@@ -18,6 +18,9 @@ from kinescore.registry.cells import (
 )
 from kinescore.registry.views import DEFAULT_VIEWS_PATH, load_views
 
+FRANKA = {"robot": "franka_panda", "view": "sv1_4x3", "corpus": "single_arm_sv"}
+FRANKA_ID = "franka_panda.single_arm_sv.sv1_4x3"
+
 
 @pytest.fixture(autouse=True)
 def _paths(tmp_path, monkeypatch):
@@ -38,9 +41,9 @@ class TestShippedConfigs:
         assert registry.cells
         assert registry.sources
 
-    def test_reader_ids_are_robot_dot_view(self, registry):
+    def test_reader_ids_are_robot_dot_corpus_dot_view(self, registry):
         for reader_id, reader in registry.readers.items():
-            assert reader_id == f"{reader.robot}.{reader.view.view_id}"
+            assert reader_id == f"{reader.robot}.{reader.corpus}.{reader.view.view_id}"
 
     def test_cell_ids_are_embodiment_dot_view_dot_model(self, registry):
         for cell_id, cell in registry.cells.items():
@@ -49,6 +52,10 @@ class TestShippedConfigs:
     def test_every_cell_reader_is_declared(self, registry):
         for cell in registry.cells.values():
             assert cell.reader.reader_id in registry.readers
+
+    def test_every_reader_scores_at_least_one_cell(self, registry):
+        for reader_id in registry.readers:
+            assert registry.cells_for_reader(reader_id)
 
     def test_cell_and_reader_agree_on_packing(self, registry):
         for cell in registry.cells.values():
@@ -59,16 +66,27 @@ class TestShippedConfigs:
             if cell.reader.status:
                 assert not cell.scorable
 
-    def test_trainable_readers_declare_a_corpus(self, registry):
+    def test_trainable_readers_declare_a_corpus_and_cameras(self, registry):
         for reader in registry.readers.values():
             if reader.trainable:
-                assert reader.train is not None and reader.train.root
+                assert reader.train is not None
+                assert reader.train.root and reader.train.cameras
+
+    def test_declared_cameras_cover_every_panel_the_view_exposes(self, registry):
+        for reader in registry.readers.values():
+            if reader.trainable:
+                assert (max(reader.view.panel_indices)
+                        < len(reader.train.cameras))
+
+    def test_train_trees_are_one_per_reader(self, registry):
+        trees = {r.train_tree for r in registry.readers.values()}
+        assert len(trees) == len(registry.readers)
 
     def test_lookup_miss_lists_what_exists(self, registry):
         with pytest.raises(KeyError, match="declared cells"):
             registry.cell("no.such.cell")
         with pytest.raises(KeyError, match="declared readers"):
-            registry.reader("no.such_reader")
+            registry.reader("no.such.reader")
 
     def test_cells_for_reader_round_trips(self, registry):
         for cell in registry.cells.values():
@@ -78,7 +96,7 @@ class TestShippedConfigs:
 class TestViews:
     def test_shipped_views_load(self):
         views = load_views(DEFAULT_VIEWS_PATH)
-        assert "sv1" in views and "mv3_row" in views
+        assert "sv1_4x3" in views and "mv3_row" in views
 
     def test_panel_geometry_matches_the_declared_frame(self):
         views = load_views(DEFAULT_VIEWS_PATH)
@@ -108,54 +126,68 @@ class TestRejections:
     def _load(self, tmp_path, cells, robots=None):
         return _load_yaml(tmp_path, cells, robots)
 
-    def test_reader_id_must_match_robot_and_view(self, tmp_path):
-        with pytest.raises(ValueError, match="must be <robot>.<view_id>"):
+    def test_reader_id_must_match_robot_corpus_and_view(self, tmp_path):
+        with pytest.raises(ValueError,
+                           match="must be <robot>.<corpus>.<view_id>"):
             self._load(tmp_path, {
-                "readers": {"wrong.sv1": {"robot": "franka_panda",
-                                          "view": "sv1"}},
+                "readers": {"franka_panda.sv1_4x3": FRANKA},
+                "cells": {},
+            })
+
+    def test_a_reader_without_a_corpus_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="names no corpus"):
+            self._load(tmp_path, {
+                "readers": {FRANKA_ID: {"robot": "franka_panda",
+                                        "view": "sv1_4x3"}},
+                "cells": {},
+            })
+
+    def test_the_corpus_in_the_id_is_the_one_trained_on(self, tmp_path):
+        with pytest.raises(ValueError,
+                           match="must be <robot>.<corpus>.<view_id>"):
+            self._load(tmp_path, {
+                "readers": {FRANKA_ID: {
+                    "robot": "franka_panda", "view": "sv1_4x3",
+                    "train": {"corpus": "other_corpus", "adapter": "lerobot",
+                              "root": "/x", "cameras": ["global"]}}},
                 "cells": {},
             })
 
     def test_unknown_view_is_named(self, tmp_path):
         with pytest.raises(ValueError, match="views.yaml"):
             self._load(tmp_path, {
-                "readers": {"franka_panda.nope": {"robot": "franka_panda",
-                                                  "view": "nope"}},
+                "readers": {"franka_panda.single_arm_sv.nope": {
+                    "robot": "franka_panda", "view": "nope",
+                    "corpus": "single_arm_sv"}},
                 "cells": {},
             })
 
     def test_cell_id_needs_three_parts(self, tmp_path):
         with pytest.raises(ValueError, match="<embodiment>.<view_id>.<model>"):
             self._load(tmp_path, {
-                "readers": {"franka_panda.sv1": {"robot": "franka_panda",
-                                                 "view": "sv1"}},
-                "cells": {"single_arm.sv1": {"reader": "franka_panda.sv1"}},
+                "readers": {FRANKA_ID: FRANKA},
+                "cells": {"single_arm.sv1_4x3": {"reader": FRANKA_ID}},
             })
 
     def test_cell_packing_must_match_its_reader(self, tmp_path):
         with pytest.raises(ValueError, match="but its reader"):
             self._load(tmp_path, {
-                "readers": {"franka_panda.sv1": {"robot": "franka_panda",
-                                                 "view": "sv1"}},
+                "readers": {FRANKA_ID: FRANKA},
                 "cells": {"single_arm.mv3_row.ctrlworld": {
-                    "reader": "franka_panda.sv1"}},
+                    "reader": FRANKA_ID}},
             })
 
     def test_cell_embodiment_must_match_its_robot(self, tmp_path):
         with pytest.raises(ValueError, match="is declared"):
             self._load(tmp_path, {
-                "readers": {"franka_panda.sv1": {"robot": "franka_panda",
-                                                 "view": "sv1"}},
-                "cells": {"bimanual.sv1.dreamgen": {
-                    "reader": "franka_panda.sv1"}},
+                "readers": {FRANKA_ID: FRANKA},
+                "cells": {"bimanual.sv1_4x3.dreamgen": {"reader": FRANKA_ID}},
             })
 
     def test_unknown_key_is_rejected(self, tmp_path):
         with pytest.raises(ValueError, match="unknown key"):
             self._load(tmp_path, {
-                "readers": {"franka_panda.sv1": {"robot": "franka_panda",
-                                                 "view": "sv1",
-                                                 "epochs": 3}},
+                "readers": {FRANKA_ID: {**FRANKA, "epochs": 3}},
                 "cells": {},
             })
 
@@ -164,32 +196,36 @@ class TestSceneKeyDeclaration:
     """``scene_key`` selects how the train/val split groups episodes."""
 
     def test_default_is_the_id_prefix(self):
-        assert TrainSource(adapter="canonical", root="/x").scene_key == "prefix"
+        source = TrainSource(corpus="c", adapter="lerobot", root="/x")
+        assert source.scene_key == "prefix"
 
     def test_only_declared_modes_are_accepted(self):
         with pytest.raises(ValueError, match="scene_key must be one of"):
-            TrainSource(adapter="canonical", root="/x", scene_key="task")
+            TrainSource(corpus="c", adapter="lerobot", root="/x",
+                        scene_key="task")
 
     def test_modes_are_prefix_and_episode(self):
         assert SCENE_KEY_MODES == {"prefix", "episode"}
 
     def test_yaml_declares_it(self, tmp_path):
         registry = _load_yaml(tmp_path, {
-            "readers": {"franka_panda.sv1": {
-                "robot": "franka_panda", "view": "sv1",
-                "train": {"adapter": "canonical", "root": "/x",
+            "readers": {FRANKA_ID: {
+                "robot": "franka_panda", "view": "sv1_4x3",
+                "train": {"corpus": "single_arm_sv", "adapter": "lerobot",
+                          "root": "/x", "cameras": ["global"],
                           "scene_key": "episode"}}},
             "cells": {},
         })
 
-        assert registry.readers["franka_panda.sv1"].train.scene_key == "episode"
+        assert registry.readers[FRANKA_ID].train.scene_key == "episode"
 
     def test_yaml_rejects_an_undeclared_mode(self, tmp_path):
         with pytest.raises(ValueError, match="scene_key must be one of"):
             _load_yaml(tmp_path, {
-                "readers": {"franka_panda.sv1": {
-                    "robot": "franka_panda", "view": "sv1",
-                    "train": {"adapter": "canonical", "root": "/x",
+                "readers": {FRANKA_ID: {
+                    "robot": "franka_panda", "view": "sv1_4x3",
+                    "train": {"corpus": "single_arm_sv", "adapter": "lerobot",
+                              "root": "/x", "cameras": ["global"],
                               "scene_key": "task"}}},
                 "cells": {},
             })

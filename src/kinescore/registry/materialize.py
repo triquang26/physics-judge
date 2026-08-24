@@ -4,9 +4,9 @@ One writer for every corpus. It packs panels to the reader's view, assigns the
 train/val split, writes the annotations, and records what it did. A run rewrites
 the tree whole, so what is on disk describes that run and no earlier one::
 
-    train/<reader_id>/videos/{train,val}/<episode_id>.mp4
-    train/<reader_id>/annotation/{train,val}/<episode_id>.json
-    train/<reader_id>/dataset_card.json
+    trees/<reader_id>/videos/{train,val}/<episode_id>.mp4
+    trees/<reader_id>/annotation/{train,val}/<episode_id>.json
+    trees/<reader_id>/dataset_card.json
 
 The split is scene-stratified and disjoint: a task never appears on both sides,
 so a validation number measures generalisation to unseen scenes rather than
@@ -78,11 +78,36 @@ def _pack_filter(view: ViewSpec, n: int) -> str:
     if view.packing == "height":
         return f"{scale}{src}vstack=inputs={n}[out]"
     if view.packing == "grid2x2":
-        return (f"{scale}{src}xstack=inputs={n}:"
-                f"layout=0_0|w0_0|0_h0|w0_h0[out]")
+        if view.panel is None:
+            raise ValueError(
+                f"view {view.view_id!r} packs a grid, which needs a `panel` "
+                f"size to place the cells")
+        w, h = view.panel
+        if n == 4:
+            return f"{scale}{src}xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0[out]"
+        if n == 3:
+            # The fourth cell is blank in the clips this view scores. ffmpeg
+            # 4.x has no `fill` on xstack, so the last row is padded instead.
+            return (f"{scale}[s0][s1]hstack=inputs=2[top];"
+                    f"[s2]pad={2 * w}:{h}:0:0:black[bottom];"
+                    f"[top][bottom]vstack=inputs=2[out]")
+        raise ValueError(
+            f"view {view.view_id!r} packs a 2x2 grid, which takes 3 or 4 "
+            f"panels, not {n}")
+    if view.packing == "none":
+        # Nothing to stack, but the frame still has to reach the declared size:
+        # the corpus camera and the clips this head scores differ in resolution.
+        if n != 1:
+            raise ValueError(
+                f"view {view.view_id!r} is a single panel but {n} cameras "
+                f"were given")
+        if not scale:
+            raise ValueError(
+                f"view {view.view_id!r} declares no `panel` size, so a raw "
+                f"camera cannot be resized to it")
+        return f"{scale}[s0]null[out]"
     raise ValueError(
-        f"view {view.view_id!r} packs {view.packing!r}, which needs no "
-        f"packing step -- a single-panel view must arrive already packed")
+        f"view {view.view_id!r} has unknown packing {view.packing!r}")
 
 
 def _pack(episode: RawEpisode, view: ViewSpec, dest: Path) -> None:
@@ -95,7 +120,8 @@ def _pack(episode: RawEpisode, view: ViewSpec, dest: Path) -> None:
     subprocess.CalledProcessError
         If ffmpeg fails.
     """
-    names = sorted(episode.views)
+    # Insertion order is panel order, set by the adapter from `cameras:`.
+    names = list(episode.views)
     wanted = list(view.panel_indices)
     if max(wanted) >= len(names):
         raise ValueError(
@@ -249,11 +275,14 @@ def materialize_train_tree(reader: ReaderSpec, *, val_ratio: float = 0.1,
         "robot": reader.robot,
         "view_id": view.view_id,
         "view": asdict(view),
+        "corpus": reader.train.corpus,
         "adapter": reader.train.adapter,
         "source_root": reader.train.root,
+        "cameras": list(reader.train.cameras),
         "joint_field": reader.train.joint_field,
         "joint_columns": list(reader.train.joint_columns),
         "gripper_column": reader.train.gripper_column,
+        "gripper_field": reader.train.gripper_field,
         "n_train": report.n_train,
         "n_val": report.n_val,
         "n_skipped": len(report.skipped),

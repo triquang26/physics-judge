@@ -10,7 +10,8 @@ HELP = "materialise a reader's train tree from the corpus it declares"
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     from kinescore.cli._shared import add_config_arguments
 
-    parser.add_argument("--reader", help="reader id, e.g. aloha_bimanual.mv3_row")
+    parser.add_argument("--reader",
+                        help="reader id, e.g. aloha_bimanual.bimanual_mv.mv4_row")
     parser.add_argument("--list", action="store_true",
                         help="print every declared reader and its status")
     parser.add_argument("--val-ratio", type=float, default=0.1,
@@ -28,22 +29,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> int:
     from kinescore.cli._shared import load, now, resolve_reader
     from kinescore.registry.materialize import materialize_train_tree
-    from kinescore.registry.provenance import run_manifest, write_run_manifest
+    from kinescore.registry.provenance import (
+        git_state,
+        run_manifest,
+        write_run_manifest,
+    )
 
     registry = load(args)
     if args.list or not args.reader:
         for reader_id, reader in sorted(registry.readers.items()):
             state = reader.status or ("ready" if reader.trainable else "no source")
-            print(f"{reader_id:34s} {reader.robot:16s} {reader.view.view_id:18s} {state}")
+            print(f"{reader_id:46s} {reader.robot:16s} "
+                  f"{reader.view.view_id:18s} {state}")
         return 0 if args.list else 1
 
     reader = resolve_reader(registry, args.reader)
-    started = now()
+    started, git = now(), git_state()
     report = materialize_train_tree(
         reader, val_ratio=args.val_ratio, seed=args.seed, limit=args.limit,
         copy=args.copy, progress=lambda m: print(f"[data] {m}"))
     write_run_manifest(report.tree, run_manifest(
-        NAME, started_at=started, sources=registry.sources,
+        NAME, started_at=started, git=git, sources=registry.sources,
         extra={"reader_id": reader.reader_id, "robot": reader.robot,
                "view_id": reader.view.view_id, "n_train": report.n_train,
                "n_val": report.n_val, "n_skipped": len(report.skipped)}))
