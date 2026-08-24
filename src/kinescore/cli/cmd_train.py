@@ -45,17 +45,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _tokens_per_view(cache_dir) -> int:
-    """Patch tokens one view contributes, read off the cache the head reads.
+    """Patch tokens one view contributes, measured off a cached tensor.
 
     The head addresses tokens by view and patch position, so it has to be
-    built for the grid the cache actually holds.
+    built for the grid the cache actually holds. The header records the grid
+    only when the layout fixed one, so the tensor is the reliable source:
+    its token axis is ``n_views * tokens_per_view``.
     """
     from kinescore.training.cache import load_cache
 
     for split in ("train", "val"):
         for path in sorted((cache_dir / split).glob("*.pt")):
-            _feat, header = load_cache(str(path), mmap=True)
-            return int(header.tokens_per_view)
+            feat, header = load_cache(str(path), mmap=True)
+            tokens = feat.shape[1]
+            if tokens % header.n_views:
+                raise SystemExit(
+                    f"{path} holds {tokens} tokens, which {header.n_views} "
+                    f"views do not divide evenly")
+            return tokens // header.n_views
     raise SystemExit(f"no cache file under {cache_dir} to read a token grid from")
 
 
