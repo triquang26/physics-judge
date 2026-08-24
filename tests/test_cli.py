@@ -12,7 +12,7 @@ import pytest
 from kinescore.cli.main import _discover_commands, build_parser, main
 
 STAGES = ("pull", "data", "cache", "train", "score", "report")
-QUERIES = ("readers", "models")
+QUERIES = ("readers", "models", "ledger")
 
 
 def _commands():
