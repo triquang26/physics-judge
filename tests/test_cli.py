@@ -11,7 +11,7 @@ import pytest
 
 from kinescore.cli.main import _discover_commands, build_parser, main
 
-STAGES = ("pull", "data", "cache", "train", "score", "report")
+STAGES = ("pull", "data", "cache", "train", "score", "report", "render")
 QUERIES = ("readers", "models", "ledger")
 
 
@@ -69,7 +69,8 @@ class TestParser:
 
 def _required_args(name: str) -> list[str]:
     """The minimum arguments a stage needs to parse."""
-    return {"cache": ["--reader", "r"], "train": ["--reader", "r"]}.get(name, [])
+    return {"cache": ["--reader", "r"], "train": ["--reader", "r"],
+            "render": ["--cell", "c"]}.get(name, [])
 
 
 class TestScorePreconditions:
