@@ -23,3 +23,10 @@ sources:
     repo: doanh25032004/video_gen_physics
     include: ["fastercache/humanoid/output/singleview/*"]
     dest: bench
+
+  # Radial single-arm clips, same shape as fastercache; the manifest does not
+  # cover them, so scoring points --videos at bench/radial.
+  radial:
+    repo: doanh25032004/video_gen_physics
+    include: ["radial/single_arm/output/singleview/*"]
+    dest: bench

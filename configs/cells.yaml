@@ -20,6 +20,20 @@ _corpus_humanoid_sv: &humanoid_sv
   joint_columns: [0, 1, 2, 3, 4, 5, 6, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43]
   scene_key: episode
 
+# Galaxea A1X singleview (makovian splits only -- non_makovian's
+# press_three_buttons is a Franka Panda). observation.state is an EE pose
+# (x, y, z, roll, pitch, yaw, gripper_width), not joint angles -- see
+# kinescore.robots.a1x_ee.spec.
+_corpus_a1x_sv: &a1x_sv
+  corpus: a1x_sv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/single_arm/singleview_a1x
+  cameras: [global]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5]
+  gripper_column: 6
+  scene_key: episode
+
 readers:
   airbot_mmk2.humanoid_mv.mv4_row:
     robot: airbot_mmk2
@@ -46,6 +60,11 @@ readers:
     view: sv1_4x3
     train: *humanoid_sv
 
+  a1x_ee.a1x_sv.sv1_4x3:
+    robot: a1x_ee
+    view: sv1_4x3
+    train: *a1x_sv
+
 cells:
   humanoid.mv4_row.ctrlworld_4view_grid:
     reader: airbot_mmk2.humanoid_mv.mv4_row
@@ -67,3 +86,9 @@ cells:
     reader: fourier_gr1.humanoid_sv.sv1_4x3
     select: {embodiment: humanoid, view: singleview, model: dreamdojo}
 
+
+  # Scored from the radial tree via `score --videos`; the select matches no
+  # manifest clip on purpose, so a run without --videos fails loudly.
+  single_arm.sv1_4x3.radial_dreamgen:
+    reader: a1x_ee.a1x_sv.sv1_4x3
+    select: {embodiment: single_arm, view: singleview, model: radial_dreamgen}

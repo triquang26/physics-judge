@@ -13,3 +13,6 @@ robots:
   synthetic_2r:
     embodiment: single_arm
     keypoints: 3
+  a1x_ee:
+    embodiment: single_arm
+    keypoints: 4

@@ -71,6 +71,7 @@ and scoring clips outside the bench manifest.
 | `airbot_mmk2.humanoid_mv.mv4_grid` | Airbot MMK2 | 2×2 of 384×216 | `humanoid.mv4_grid.dreamgen` |
 | `fourier_gr1.humanoid_sv.sv1_16x9` | Fourier GR-1 | 768×432 | `humanoid.sv1_16x9.dreamgen` |
 | `fourier_gr1.humanoid_sv.sv1_4x3` | Fourier GR-1 | 640×480 | `humanoid.sv1_4x3.dreamdojo`, fastercache |
+| `a1x_ee.a1x_sv.sv1_4x3` | Galaxea A1X (EE pose) | 640×480 | `single_arm.sv1_4x3.radial_dreamgen` (radial, via `--videos`) |
 
 `Synthetic2R` (closed-form, no URDF) is the CPU-only test fixture.
 
