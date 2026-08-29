@@ -17,9 +17,14 @@ channel, not `q` (see `src/kinescore/robots/aloha/fk.py`).
 `configs/cells.yaml`.
 
 **Asset**: `$KINESCORE_ASSETS/aloha/urdf/aloha_bimanual.urdf` (29 links,
-28 joints, kinematics-only, ~30 KB). Assets are never vendored in this repo;
-mirror the assets tree, whose `MANIFEST.json` ("aloha" key) records full
-provenance: the two vx300s xacro expansions
+28 joints, kinematics-only, ~30 KB). Assets are never vendored in this repo —
+fetch them from the bucket:
+
+```bash
+hf buckets sync hf://buckets/twanghcmut/hallucinate-bench/assets $KINESCORE_ASSETS
+```
+
+The tree's `MANIFEST.json` ("aloha" key) records full provenance: the two vx300s xacro expansions
 (Interbotix `interbotix_ros_manipulators` @ `0bb2b0e`), the left/right mount
 transforms (Mujoco Menagerie `aloha.xml` @ `feadf76`), and the merge. The
 pre-merge inputs are kept beside it under `aloha/urdf/vx300s_src/` so the
