@@ -165,3 +165,7 @@ cells:
   single_arm.sv1_4x3.radial_dreamgen:
     reader: a1x_ee.a1x_sv.sv1_4x3
     select: {embodiment: single_arm, view: singleview, model: radial_dreamgen}
+
+  single_arm.sv1_4x3.dense_dreamgen:
+    reader: a1x_ee.a1x_sv.sv1_4x3
+    select: {embodiment: single_arm, view: singleview, model: dense_dreamgen}

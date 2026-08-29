@@ -37,3 +37,8 @@ sources:
     include: ["radial/single_arm/output/singleview/*",
               "radial/bimanual/output/singleview/*"]
     dest: bench
+
+  dense:
+    repo: doanh25032004/video_gen_physics
+    include: ["dense/single_arm/output/singleview/*"]
+    dest: bench
