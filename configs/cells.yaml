@@ -88,6 +88,11 @@ readers:
     view: mv4_row_static
     train: *humanoid_mv
 
+  airbot_mmk2.humanoid_mv.mv4_grid_static:
+    robot: airbot_mmk2
+    view: mv4_grid_static
+    train: *humanoid_mv
+
   fourier_gr1.humanoid_sv.sv1_16x9:
     robot: fourier_gr1
     view: sv1_16x9
@@ -138,9 +143,17 @@ cells:
     reader: airbot_mmk2.humanoid_mv.mv4_grid
     select: {embodiment: humanoid, view: multiview, model: dreamgen}
 
+  humanoid.mv4_grid_static.dreamgen:
+    reader: airbot_mmk2.humanoid_mv.mv4_grid_static
+    select: {embodiment: humanoid, view: multiview, model: dreamgen}
+
   humanoid.sv1_16x9.dreamgen:
     reader: fourier_gr1.humanoid_sv.sv1_16x9
     select: {embodiment: humanoid, view: singleview, model: dreamgen}
+
+  humanoid.sv1_16x9.cosmos:
+    reader: fourier_gr1.humanoid_sv.sv1_16x9
+    select: {embodiment: humanoid, view: singleview, model: cosmos}
 
   humanoid.sv1_4x3.dreamdojo:
     reader: fourier_gr1.humanoid_sv.sv1_4x3

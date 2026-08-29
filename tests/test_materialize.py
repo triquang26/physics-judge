@@ -474,3 +474,53 @@ class TestWidthSubset:
         assert frame[12, 48, 2] > frame[12, 48, 0]
         assert frame[12, 80].tolist() == [0, 0, 0]
         assert frame[12, 112].min() > 200
+
+
+def _grid_subset(panels: tuple[int, ...]) -> ViewSpec:
+    return ViewSpec(view_id="mv4_grid_subset", n_views=len(panels),
+                    packing="grid2x2", n_panels=4, panels=panels,
+                    panel=(32, 24))
+
+
+class TestGridSubset:
+    """A 2x2 grid whose corpus fills only some of the cells."""
+
+    def _frame(self, tmp_path, adapter_id, view, cameras):
+        episode = RawEpisode(
+            episode_id="task0__0", joints=np.zeros((8, 7), dtype=np.float32),
+            fps=10.0, scene_key="task0", source_path="/corpus/task0__0",
+            views={c: _solid(tmp_path / f"{c}.mp4", c) for c in cameras})
+        _register([episode], adapter_id)
+        reader = ReaderSpec(
+            reader_id=f"airbot_mmk2.{CORPUS}.{view.view_id}",
+            robot="airbot_mmk2", view=view,
+            train=TrainSource(corpus=CORPUS, adapter=adapter_id,
+                              root=str(tmp_path), cameras=cameras))
+
+        report = materialize_train_tree(reader, val_ratio=0.25, seed=0)
+
+        assert report.n_written == 1, report.skipped
+        (video,) = _written(reader)
+        return _first_frame(video, 64, 48)
+
+    def test_the_top_row_is_kept_and_the_wrist_row_is_black(
+            self, tmp_path, request):
+        frame = self._frame(tmp_path, f"fake_{request.node.name}",
+                            _grid_subset((0, 1)),
+                            ("red", "blue", "green", "white"))
+
+        assert frame[12, 16, 0] > frame[12, 16, 2]
+        assert frame[12, 48, 2] > frame[12, 48, 0]
+        assert frame[36, 16].tolist() == [0, 0, 0]
+        assert frame[36, 48].tolist() == [0, 0, 0]
+
+    def test_a_cell_lands_at_the_index_it_is_declared_at(self, tmp_path,
+                                                         request):
+        frame = self._frame(tmp_path, f"fake_{request.node.name}",
+                            _grid_subset((1, 3)),
+                            ("red", "blue", "green", "white"))
+
+        assert frame[12, 16].tolist() == [0, 0, 0]
+        assert frame[12, 48, 2] > frame[12, 48, 0]
+        assert frame[36, 16].tolist() == [0, 0, 0]
+        assert frame[36, 48].min() > 200

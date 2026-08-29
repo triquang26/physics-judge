@@ -91,9 +91,17 @@ def _pack_filter(view: ViewSpec, n: int) -> str:
             return (f"{scale}[s0][s1]hstack=inputs=2[top];"
                     f"[s2]pad={2 * w}:{h}:0:0:black[bottom];"
                     f"[top][bottom]vstack=inputs=2[out]")
-        raise ValueError(
-            f"view {view.view_id!r} packs a 2x2 grid, which takes 3 or 4 "
-            f"panels, not {n}")
+        # A dropped cell is black here and never read, exactly as in the
+        # width subset: each exposed panel sits at its own grid cell, so the
+        # tree and the clips this view scores are one geometry.
+        parts = []
+        r0, c0 = divmod(view.panel_indices[0], 2)
+        pending = f"[s0]pad={2 * w}:{2 * h}:{c0 * w}:{r0 * h}:black"
+        for i, panel in enumerate(view.panel_indices[1:], 1):
+            parts.append(f"{pending}[b{i}];")
+            r, c = divmod(panel, 2)
+            pending = f"[b{i}][s{i}]overlay=x={c * w}:y={r * h}"
+        return f"{scale}{''.join(parts)}{pending}[out]"
     if view.packing == "none":
         # Nothing to stack, but the frame still has to reach the declared size:
         # the corpus camera and the clips this head scores differ in resolution.

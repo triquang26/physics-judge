@@ -34,6 +34,16 @@ views:
     n_panels: 4
     panel: [384, 216]
 
+  # mv4_grid without its two wrist panels: the top row holds the head and
+  # third-person cameras, the bottom row the wrists. The subset is by panel
+  # index into the same 768x432 grid, so it reads mv4_grid's clips uncropped.
+  mv4_grid_static:
+    n_views: 2
+    packing: grid2x2
+    n_panels: 4
+    panels: [0, 1]
+    panel: [384, 216]
+
   # Split by aspect ratio: the two single-view generators emit different
   # frames, and a shared head would fold resize distortion into the comparison.
   sv1_4x3:

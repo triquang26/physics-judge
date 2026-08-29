@@ -21,8 +21,14 @@ sources:
   # manifest does not cover it, so scoring points --videos at it.
   fastercache:
     repo: doanh25032004/video_gen_physics
-    include: ["fastercache/humanoid/output/singleview/*"]
+    include: ["fastercache/humanoid/output/singleview/*",
+              "fastercache/humanoid/output/multiview/*"]
     dest: bench
+
+  cosmos:
+    repo: doanh25032004/cosmos_synthetic_data
+    include: ["high/*", "low/*"]
+    dest: bench/cosmos
 
   # Radial single-arm clips, same shape as fastercache; the manifest does not
   # cover them, so scoring points --videos at bench/radial.
