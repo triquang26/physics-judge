@@ -1,0 +1,47 @@
+# view_id -> panel geometry. The only definition of a packing in this repo.
+#
+# `panel` is one panel's size in pixels, measured from the clips: a seam counts
+# only when the column/row difference stands an order of magnitude above the
+# median. `check_frame_size` rejects any clip that is not `n_panels` of it.
+#
+# A view is geometry only. Which camera fills which panel is a property of the
+# corpus, declared as `cameras:` on the reader's train source.
+
+views:
+  # Ctrl-World multiview. Upstream calls it "4view_grid"; the seams put all
+  # four panels in one row.
+  mv4_row:
+    n_views: 4
+    packing: width
+    n_panels: 4
+    panel: [320, 192]
+
+  # mv4_row without its two wrist panels. A wrist camera rides the arm, so its
+  # frame shows the fingers rather than where the arm is; this view exposes the
+  # head and third-person panels only. The subset is by panel index into the
+  # same 1280x192 packing, so it reads mv4_row's clips uncropped.
+  mv4_row_static:
+    n_views: 2
+    packing: width
+    n_panels: 4
+    panels: [0, 1]
+    panel: [320, 192]
+
+  # DreamGen multiview: seams at x=383, y=215, 20-40x the median difference.
+  mv4_grid:
+    n_views: 4
+    packing: grid2x2
+    n_panels: 4
+    panel: [384, 216]
+
+  # Split by aspect ratio: the two single-view generators emit different
+  # frames, and a shared head would fold resize distortion into the comparison.
+  sv1_4x3:
+    n_views: 1
+    packing: none
+    panel: [640, 480]
+
+  sv1_16x9:
+    n_views: 1
+    packing: none
+    panel: [768, 432]

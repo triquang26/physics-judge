@@ -1,0 +1,24 @@
+{
+  "description": "Frozen FK reference arrays. A change in any of these numbers is a change in robot geometry, not a refactor.",
+  "versions": {
+    "python": "3.10.12",
+    "torch": "2.7.1",
+    "numpy": "2.2.6",
+    "pytorch-kinematics": "0.10.0",
+    "robot-descriptions": "2.0.0"
+  },
+  "seed": 0,
+  "fixtures": {
+    "golden_gr1_fk": {
+      "file": "golden_gr1_fk.npz",
+      "size_bytes": 18306,
+      "n_arrays": 16,
+      "source_qualnames": [
+        "GR1FK.forward_transforms",
+        "GR1FK.ee_pose",
+        "GR1FK.keypoints_fk"
+      ],
+      "rng_seeds": "torch.manual_seed(0)"
+    }
+  }
+}

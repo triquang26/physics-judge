@@ -1,0 +1,68 @@
+"""One generic registry, reused by every extension axis: robots, dataset"""
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Generic, TypeVar
+
+__all__ = ["Registry"]
+
+T = TypeVar("T")
+
+
+class Registry(Generic[T]):
+    """``name -> lazy factory -> T``, for one extension axis.
+
+    Parameters
+    ----------
+    kind:
+        Human-readable name for what this registry holds (``"robot"``,
+        ``"metric suite"``, ...) -- used only to make error messages name
+        the right thing when a project has several registries in play.
+    """
+
+    def __init__(self, kind: str) -> None:
+        self._kind = kind
+        self._factories: dict[str, Callable[[], T]] = {}
+
+    def register(self, name: str, factory: Callable[[], T]) -> None:
+        """Add ``name -> factory``. ``factory`` is stored, not called.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is already registered -- a silent overwrite would let
+            a second, differently-behaved implementation shadow the first
+            with no signal at the call site.
+        """
+        if name in self._factories:
+            raise ValueError(f"{self._kind} {name!r} is already registered")
+        self._factories[name] = factory
+
+    def get(self, name: str, **kwargs) -> T:
+        """Call and return the factory registered under ``name``.
+
+        Parameters
+        ----------
+        **kwargs:
+            Forwarded to the factory (e.g. ``device``/``dtype``/``urdf_path``
+            overrides some factories accept). A factory that takes no
+            arguments simply ignores an empty ``kwargs``.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is not registered -- lists every valid name, so a
+            typo fails at the call site instead of surfacing deep inside
+            whatever consumed the missing ``T``.
+        """
+        try:
+            factory = self._factories[name]
+        except KeyError:
+            raise ValueError(
+                f"unknown {self._kind} {name!r}; available: "
+                f"{list(self.available())}") from None
+        return factory(**kwargs)
+
+    def available(self) -> tuple[str, ...]:
+        """Registered names, in a stable (sorted) order."""
+        return tuple(sorted(self._factories))

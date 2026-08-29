@@ -1,0 +1,15 @@
+# robot -> embodiment and keypoint count.
+#
+# keypoints is checked against what the robot's forward kinematics actually
+# produces, so a URDF swap that changes K cannot pass silently.
+
+robots:
+  airbot_mmk2:
+    embodiment: humanoid
+    keypoints: 12
+  fourier_gr1:
+    embodiment: humanoid
+    keypoints: 12
+  synthetic_2r:
+    embodiment: single_arm
+    keypoints: 3

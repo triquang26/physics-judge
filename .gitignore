@@ -1,0 +1,29 @@
+# Assets are referenced via KINESCORE_ASSETS, never vendored.
+# The GR-1 URDF tree alone is ~285 MB and a prior extraction shipped 9 GB of
+# outputs inside its own repo. Once committed, that is not reversible without
+# rewriting history -- so this file exists before the first commit, not after.
+assets/
+outputs/
+out/
+model_ckpt/
+*.pt
+*.pth
+*.ckpt
+*.mp4
+*.parquet
+*.npz
+# golden fixtures ARE tracked; budget < 4 MB, enforced by test
+!tests/golden/*.npz
+
+# Environments and caches
+.venv/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
