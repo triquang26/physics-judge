@@ -35,6 +35,7 @@ sources:
   radial:
     repo: doanh25032004/video_gen_physics
     include: ["radial/single_arm/output/singleview/*",
+              "radial/single_arm/output/multiview/*",
               "radial/bimanual/output/singleview/*"]
     dest: bench
 
