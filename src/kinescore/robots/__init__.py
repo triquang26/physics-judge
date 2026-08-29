@@ -8,11 +8,6 @@ from kinescore.robots.synthetic import Synthetic2R
 __all__ = ["get_robot", "available_robots"]
 
 
-def _build_franka(**kwargs) -> RobotSpec:
-    from kinescore.robots.franka.spec import FrankaSpec
-    return FrankaSpec(**kwargs)
-
-
 def _build_gr1(**kwargs) -> RobotSpec:
     from kinescore.robots.gr1.spec import GR1Spec
     return GR1Spec(**kwargs)
@@ -41,7 +36,6 @@ def _build_aloha_bimanual(**kwargs) -> RobotSpec:
 #: imports lazily (see module docstring); constructing the registry below
 #: does not import pytorch_kinematics/robot_descriptions itself.
 _REGISTRY: Registry[RobotSpec] = Registry(kind="robot")
-_REGISTRY.register("franka_panda", _build_franka)
 _REGISTRY.register("fourier_gr1", _build_gr1)
 _REGISTRY.register("airbot_mmk2", _build_airbot_mmk2)
 _REGISTRY.register("synthetic_2r", _build_synthetic)

@@ -87,3 +87,4 @@ and scoring clips outside the bench manifest.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | modules, the diffusion head, adding a robot |
 | [`docs/METRICS.md`](docs/METRICS.md) | detectors, segments, calibration |
 | [`docs/BIMANUAL.md`](docs/BIMANUAL.md) | ALOHA bimanual end-to-end: every command from download to bucket push |
+| [`docs/MULTIVIEW_STATIC.md`](docs/MULTIVIEW_STATIC.md) | Humanoid multiview on the two static cameras: run book + real-motion baseline |

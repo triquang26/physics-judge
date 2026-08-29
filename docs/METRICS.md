@@ -44,6 +44,33 @@ survives is motion the reader would not produce on real video — and a cell
 whose reader has worse `val_mm` has looser thresholds, so scores compare
 across cells only when the readers are comparable.
 
+### Segment-level baseline on real motion
+
+The p95 is per **frame**; verdicts are per **segment** through the reduce, so
+the fraction of *real* segments flagged is not 5%. `median` (rigidity) needs 8
+of 16 frames over the threshold and lands below 5%; `worst` needs one frame
+and lands far above it. The exact baseline for a reader is measured by scoring
+its own calibration clips through the same pipeline:
+
+```bash
+kinescore score --cell <any cell of the reader> \
+    --videos $KINESCORE_DATA_ROOT/trees/<reader_id>/videos/val --limit 24 \
+    --out out/baseline.<view>.real
+```
+
+Measured baselines (real val clips, in-sample with the thresholds):
+
+| reader | segments | rigidity | jerk | teleport | joint_limit | self_collision |
+|---|---|---|---|---|---|---|
+| `airbot_mmk2.humanoid_mv.mv4_grid_static` | 296 | 1.4% | 33.4% | 39.2% | 51.4% | 16.6% |
+| `fourier_gr1.humanoid_sv.sv1_16x9` | 524 | 4.0% | 31.3% | 39.9% | 22.5% | 10.5% |
+| `fourier_gr1.humanoid_sv.sv1_4x3` | 524 | 4.8% | 45.2% | 43.3% | 15.6% | 8.4% |
+
+Read a cell's rate as its **excess over the same reader's baseline**, not
+against zero. A generated set can also sit far *below* the baseline on the
+dynamics detectors (jerk, teleport) — motion smoother than the real robot,
+which those detectors do not reward or flag.
+
 ## rigidity
 
 For each pair in `robot.rigid_bone_pairs`, `|P[:, a] - P[:, b]|` in mm; the

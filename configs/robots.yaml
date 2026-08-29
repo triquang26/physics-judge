@@ -4,9 +4,6 @@
 # produces, so a URDF swap that changes K cannot pass silently.
 
 robots:
-  franka_panda:
-    embodiment: single_arm
-    keypoints: 8
   airbot_mmk2:
     embodiment: humanoid
     keypoints: 12

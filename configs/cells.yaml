@@ -52,19 +52,6 @@ _corpus_a1x_sv: &a1x_sv
   gripper_column: 6
   scene_key: episode
 
-# DROID-style Franka multiview: the two exterior cameras are static, the
-# wrist camera rides the arm, so the static bench reads panels [0, 1] only
-# and the wrist view never enters the tree.
-_corpus_single_arm_mv: &single_arm_mv
-  corpus: single_arm_mv
-  adapter: lerobot
-  root: ${KINESCORE_DATA_ROOT}/corpus/single_arm/multiview
-  cameras: [exterior_1_left, exterior_2_left]
-  joint_field: observation.state.joint_position
-  joint_columns: [0, 1, 2, 3, 4, 5, 6]
-  gripper_field: observation.state.gripper_position
-  scene_key: episode
-
 readers:
   aloha_bimanual.bimanual_mv.mv4_row:
     robot: aloha_bimanual
@@ -115,11 +102,6 @@ readers:
     robot: fourier_gr1
     view: sv1_4x3
     train: *humanoid_sv
-
-  franka_panda.single_arm_mv.mv4_grid_static:
-    robot: franka_panda
-    view: mv4_grid_static
-    train: *single_arm_mv
 
   a1x_ee.a1x_sv.sv1_4x3:
     robot: a1x_ee
@@ -183,11 +165,3 @@ cells:
   single_arm.sv1_4x3.radial_dreamgen:
     reader: a1x_ee.a1x_sv.sv1_4x3
     select: {embodiment: single_arm, view: singleview, model: radial_dreamgen}
-
-  single_arm.sv1_4x3.dense_dreamgen:
-    reader: a1x_ee.a1x_sv.sv1_4x3
-    select: {embodiment: single_arm, view: singleview, model: dense_dreamgen}
-
-  single_arm.mv4_grid_static.radial_dreamgen:
-    reader: franka_panda.single_arm_mv.mv4_grid_static
-    select: {embodiment: single_arm, view: multiview, model: radial_dreamgen}
