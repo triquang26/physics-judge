@@ -19,6 +19,15 @@
         "GR1FK.keypoints_fk"
       ],
       "rng_seeds": "torch.manual_seed(0)"
+    },
+    "golden_fk_aloha_bimanual": {
+      "file": "golden_fk_aloha_bimanual.npz",
+      "size_bytes": 202364,
+      "n_arrays": 20,
+      "source_qualnames": [
+        "AlohaSpec.forward_kinematics"
+      ],
+      "rng_seeds": "torch.manual_seed(0)"
     }
   }
 }

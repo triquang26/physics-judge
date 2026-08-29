@@ -16,3 +16,6 @@ robots:
   a1x_ee:
     embodiment: single_arm
     keypoints: 4
+  aloha_bimanual:
+    embodiment: bimanual
+    keypoints: 18

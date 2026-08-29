@@ -21,13 +21,15 @@ kinescore pull --what fastercache   # generated clips outside the manifest
 ```
 $KINESCORE_DATA_ROOT/
     bench/      clips/<id>.mp4, manifest.json, dense|augment|worldcache/, fastercache/
-    corpus/     humanoid/{multiview,singleview}/
+    corpus/     {bimanual,humanoid}/{multiview,singleview}/
     trees/      <reader_id>/{videos,annotation}/{train,val}/
     REVISIONS.json
 ```
 
 | corpus | robot | cameras | episodes |
 |---|---|---|---|
+| `bimanual_mv` | ALOHA (2×vx300s) | cam_high, cam_low, two wrists | 300 |
+| `bimanual_sv` | ALOHA (2×vx300s) | cam_high | 300 |
 | `humanoid_mv` | Airbot MMK2 | head, third-person, two wrists | 248 |
 | `humanoid_sv` | Fourier GR-1 | ego view | 260 |
 

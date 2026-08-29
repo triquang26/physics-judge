@@ -27,6 +27,11 @@ def _build_a1x_ee(**kwargs) -> RobotSpec:
     return A1XEESpec(**kwargs)
 
 
+def _build_aloha_bimanual(**kwargs) -> RobotSpec:
+    from kinescore.robots.aloha.spec import AlohaSpec
+    return AlohaSpec(**kwargs)
+
+
 #: Registry key -> zero-import-cost factory. Each factory does its own heavy
 #: imports lazily (see module docstring); constructing the registry below
 #: does not import pytorch_kinematics/robot_descriptions itself.
@@ -35,6 +40,7 @@ _REGISTRY.register("fourier_gr1", _build_gr1)
 _REGISTRY.register("airbot_mmk2", _build_airbot_mmk2)
 _REGISTRY.register("synthetic_2r", _build_synthetic)
 _REGISTRY.register("a1x_ee", _build_a1x_ee)
+_REGISTRY.register("aloha_bimanual", _build_aloha_bimanual)
 
 
 def get_robot(name: str, **kwargs) -> RobotSpec:

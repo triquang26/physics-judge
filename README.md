@@ -72,6 +72,10 @@ and scoring clips outside the bench manifest.
 | `fourier_gr1.humanoid_sv.sv1_16x9` | Fourier GR-1 | 768×432 | `humanoid.sv1_16x9.dreamgen` |
 | `fourier_gr1.humanoid_sv.sv1_4x3` | Fourier GR-1 | 640×480 | `humanoid.sv1_4x3.dreamdojo`, fastercache |
 | `a1x_ee.a1x_sv.sv1_4x3` | Galaxea A1X (EE pose) | 640×480 | `single_arm.sv1_4x3.radial_dreamgen` (radial, via `--videos`) |
+| `aloha_bimanual.bimanual_mv.mv4_row` | ALOHA 2×vx300s | 4×(320×192) row | `bimanual.mv4_row.ctrlworld_4view_grid` |
+| `aloha_bimanual.bimanual_mv.mv4_grid` | ALOHA 2×vx300s | 2×2 of 384×216 | `bimanual.mv4_grid.dreamgen` |
+| `aloha_bimanual.bimanual_sv.sv1_16x9` | ALOHA 2×vx300s | 768×432 | `bimanual.sv1_16x9.dreamgen`, `bimanual.sv1_16x9.radial_dreamgen` (radial, via `--videos`) |
+| `aloha_bimanual.bimanual_sv.sv1_4x3` | ALOHA 2×vx300s | 640×480 | `bimanual.sv1_4x3.dreamdojo` |
 
 `Synthetic2R` (closed-form, no URDF) is the CPU-only test fixture.
 
@@ -82,3 +86,4 @@ and scoring clips outside the bench manifest.
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | data, training, scoring, outputs |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | modules, the diffusion head, adding a robot |
 | [`docs/METRICS.md`](docs/METRICS.md) | detectors, segments, calibration |
+| [`docs/BIMANUAL.md`](docs/BIMANUAL.md) | ALOHA bimanual end-to-end: every command from download to bucket push |

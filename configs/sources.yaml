@@ -13,7 +13,7 @@ sources:
 
   train:
     repo: doanh25032004/vgp_datasets
-    include: ["humanoid/*"]
+    include: ["bimanual/*", "humanoid/*"]
     dest: corpus
 
   # Generated clips outside data_for_web. Lands under bench/fastercache, the
@@ -28,5 +28,6 @@ sources:
   # cover them, so scoring points --videos at bench/radial.
   radial:
     repo: doanh25032004/video_gen_physics
-    include: ["radial/single_arm/output/singleview/*"]
+    include: ["radial/single_arm/output/singleview/*",
+              "radial/bimanual/output/singleview/*"]
     dest: bench

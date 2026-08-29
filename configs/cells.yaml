@@ -2,6 +2,24 @@
 # cell   = one scored unit, <embodiment>.<view>.<model>.
 # method (dense/augment/worldcache), role and split partition a cell's clips.
 
+_corpus_bimanual_mv: &bimanual_mv
+  corpus: bimanual_mv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/bimanual/multiview
+  cameras: [cam_high, cam_low, cam_left_wrist, cam_right_wrist]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
+  gripper_column: 6
+
+_corpus_bimanual_sv: &bimanual_sv
+  corpus: bimanual_sv
+  adapter: lerobot
+  root: ${KINESCORE_DATA_ROOT}/corpus/bimanual/singleview
+  cameras: [cam_high]
+  joint_field: observation.state
+  joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
+  gripper_column: 6
+
 _corpus_humanoid_mv: &humanoid_mv
   corpus: humanoid_mv
   adapter: lerobot
@@ -35,6 +53,26 @@ _corpus_a1x_sv: &a1x_sv
   scene_key: episode
 
 readers:
+  aloha_bimanual.bimanual_mv.mv4_row:
+    robot: aloha_bimanual
+    view: mv4_row
+    train: *bimanual_mv
+
+  aloha_bimanual.bimanual_mv.mv4_grid:
+    robot: aloha_bimanual
+    view: mv4_grid
+    train: *bimanual_mv
+
+  aloha_bimanual.bimanual_sv.sv1_16x9:
+    robot: aloha_bimanual
+    view: sv1_16x9
+    train: *bimanual_sv
+
+  aloha_bimanual.bimanual_sv.sv1_4x3:
+    robot: aloha_bimanual
+    view: sv1_4x3
+    train: *bimanual_sv
+
   airbot_mmk2.humanoid_mv.mv4_row:
     robot: airbot_mmk2
     view: mv4_row
@@ -66,6 +104,28 @@ readers:
     train: *a1x_sv
 
 cells:
+  bimanual.mv4_row.ctrlworld_4view_grid:
+    reader: aloha_bimanual.bimanual_mv.mv4_row
+    select: {embodiment: bimanual, view: multiview, model: ctrlworld_4view_grid}
+
+  bimanual.mv4_grid.dreamgen:
+    reader: aloha_bimanual.bimanual_mv.mv4_grid
+    select: {embodiment: bimanual, view: multiview, model: dreamgen}
+
+  bimanual.sv1_16x9.dreamgen:
+    reader: aloha_bimanual.bimanual_sv.sv1_16x9
+    select: {embodiment: bimanual, view: singleview, model: dreamgen}
+
+  bimanual.sv1_4x3.dreamdojo:
+    reader: aloha_bimanual.bimanual_sv.sv1_4x3
+    select: {embodiment: bimanual, view: singleview, model: dreamdojo}
+
+  # Scored from the radial tree via `score --videos`; the select matches no
+  # manifest clip on purpose, so a run without --videos fails loudly.
+  bimanual.sv1_16x9.radial_dreamgen:
+    reader: aloha_bimanual.bimanual_sv.sv1_16x9
+    select: {embodiment: bimanual, view: singleview, model: radial_dreamgen}
+
   humanoid.mv4_row.ctrlworld_4view_grid:
     reader: airbot_mmk2.humanoid_mv.mv4_row
     select: {embodiment: humanoid, view: multiview, model: ctrlworld_4view_grid}
