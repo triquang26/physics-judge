@@ -70,14 +70,19 @@ kinescore pull --what dense      # dense reconstructions (clean references)
 ```bash
 for R in a1x_ee.a1x_sv.sv1_4x3 franka_panda.single_arm_mv.mv4_grid_static; do
   kinescore data  --reader $R
-  kinescore cache --reader $R --device cuda --max-frames 64
+  kinescore cache --reader $R --device cuda
   kinescore train --reader $R --device cuda --steps 3000
 done
 ```
 
 Reference: `a1x_ee.a1x_sv.sv1_4x3` reached val_mm ≈ 24.4 at 3000 steps
-(108 train / 12 val episodes, 64 frames each). EE-pose keypoints are a far
-easier target than a full arm — compare within the embodiment only.
+(108 train / 12 val episodes). EE-pose keypoints are a far easier target than a
+full arm — compare within the embodiment only.
+
+`franka_panda.single_arm_mv.mv4_grid_static` sits at val_mm ≈ 156 and is kept
+out of the rating batch. Its corpus spans 22 buildings and 40 episodes whose
+extrinsics vary by 1.55 m, so inferring a base frame from pixels is ill-posed
+and the head cannot do better without a target expressed in camera frame.
 
 ## 3. Score
 

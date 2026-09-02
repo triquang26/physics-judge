@@ -64,7 +64,7 @@ Measured baselines (real val clips, in-sample with the thresholds):
 |---|---|---|---|---|---|---|
 | `airbot_mmk2.humanoid_mv.mv4_grid_static` | 296 | 1.4% | 33.4% | 39.2% | 51.4% | 16.6% |
 | `fourier_gr1.humanoid_sv.sv1_16x9` | 524 | 4.0% | 31.3% | 39.9% | 22.5% | 10.5% |
-| `fourier_gr1.humanoid_sv.sv1_4x3` | 524 | 4.8% | 45.2% | 43.3% | 15.6% | 8.4% |
+| `fourier_gr1.humanoid_sv.sv1_16x9` | 524 | 4.8% | 45.2% | 43.3% | 15.6% | 8.4% |
 
 Read a cell's rate as its **excess over the same reader's baseline**, not
 against zero. A generated set can also sit far *below* the baseline on the

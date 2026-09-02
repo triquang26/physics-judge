@@ -18,7 +18,7 @@ forward kinematics.
 
 | id | shape | one per | example |
 |---|---|---|---|
-| reader | `<robot>.<corpus>.<view_id>` | trained head | `fourier_gr1.humanoid_sv.sv1_4x3` |
+| reader | `<robot>.<corpus>.<view_id>` | trained head | `fourier_gr1.humanoid_sv.sv1_16x9` |
 | cell | `<embodiment>.<view_id>.<model>` | scored unit | `humanoid.sv1_4x3.dreamdojo` |
 
 A cell names the reader it reads through; several cells can share one reader.

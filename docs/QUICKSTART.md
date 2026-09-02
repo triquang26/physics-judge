@@ -38,7 +38,7 @@ $KINESCORE_DATA_ROOT/
 Three commands per reader, in order. Ids: `kinescore readers --ids`.
 
 ```bash
-R=fourier_gr1.humanoid_sv.sv1_4x3
+R=fourier_gr1.humanoid_sv.sv1_16x9
 kinescore data  --reader $R                  # corpus → train tree (ffmpeg, CPU)
 kinescore cache --reader $R --device cuda    # frozen backbone → token cache
 kinescore train --reader $R --device cuda    # → $KINESCORE_CKPT_DIR/$R.pt
@@ -139,7 +139,7 @@ in scoring order, plus one `segments.json`:
 
 ```bash
 export HF_TOKEN=<write token>   # env only, never a file
-kinescore push --reader fourier_gr1.humanoid_sv.sv1_4x3 \
+kinescore push --reader fourier_gr1.humanoid_sv.sv1_16x9 \
     --scores out/fastercache.sv1_4x3.dreamdojo \
     --web out/web/fastercache_humanoid_sv
 ```
