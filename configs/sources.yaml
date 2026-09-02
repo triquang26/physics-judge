@@ -43,3 +43,56 @@ sources:
     repo: doanh25032004/video_gen_physics
     include: ["dense/single_arm/output/singleview/*"]
     dest: bench
+
+  # The remaining generators, one entry each. Every one ships the same
+  # dreamgen/makovian branch for all three embodiments, so a cell can score any
+  # of them against the reader its embodiment already has.
+  itm:
+    repo: doanh25032004/video_gen_physics
+    include: ["itm/humanoid/output/singleview/dreamgen/makovian/**",
+              "itm/bimanual/output/singleview/dreamgen/makovian/**",
+              "itm/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
+  sito:
+    repo: doanh25032004/video_gen_physics
+    include: ["sito/humanoid/output/singleview/dreamgen/makovian/**",
+              "sito/bimanual/output/singleview/dreamgen/makovian/**",
+              "sito/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
+  dicache:
+    repo: doanh25032004/video_gen_physics
+    include: ["dicache/humanoid/output/singleview/dreamgen/makovian/**",
+              "dicache/bimanual/output/singleview/dreamgen/makovian/**",
+              "dicache/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
+  pisa:
+    repo: doanh25032004/video_gen_physics
+    include: ["pisa/humanoid/output/singleview/dreamgen/makovian/**",
+              "pisa/bimanual/output/singleview/dreamgen/makovian/**",
+              "pisa/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
+  svg1:
+    repo: doanh25032004/video_gen_physics
+    include: ["svg1/humanoid/output/singleview/dreamgen/makovian/**",
+              "svg1/bimanual/output/singleview/dreamgen/makovian/**",
+              "svg1/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
+  svg2:
+    repo: doanh25032004/video_gen_physics
+    include: ["svg2/humanoid/output/singleview/dreamgen/makovian/**",
+              "svg2/bimanual/output/singleview/dreamgen/makovian/**",
+              "svg2/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
+  worldcache:
+    repo: doanh25032004/video_gen_physics
+    include: ["worldcache/humanoid/output/singleview/dreamgen/makovian/**",
+              "worldcache/bimanual/output/singleview/dreamgen/makovian/**",
+              "worldcache/single_arm/output/singleview/dreamgen/makovian/**"]
+    dest: bench/methods
+
