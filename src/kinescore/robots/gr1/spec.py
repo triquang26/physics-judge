@@ -7,7 +7,14 @@ import torch
 
 from kinescore.core.robot import Capability, rigid_bone_mask
 from kinescore.robots.gr1.colliders import RobotColliders
-from kinescore.robots.gr1.fk import EE_LINK, GR1FK, KEYPOINTS_LEFT, KEYPOINTS_RIGHT
+from kinescore.robots.gr1.fk import (
+    EE_LINK,
+    FINGERTIPS_LEFT,
+    FINGERTIPS_RIGHT,
+    GR1FK,
+    KEYPOINTS_LEFT,
+    KEYPOINTS_RIGHT,
+)
 from kinescore.robots.urdf import resolve_asset_urdf, sha256_file
 
 __all__ = ["GR1Spec", "GR1_URDF_RELPATH"]
@@ -60,7 +67,7 @@ class GR1Spec:
 
     #: Registry key (kinescore.robots.get_robot).
     name = "fourier_gr1"
-    #: Predicted DOF: left arm (7) + right arm (7) + waist (3). See module docstring.
+    #: Predicted DOF: left arm (7) + right arm (7) + waist (3) + six actuators per hand.
     n_joints = GR1FK.N_Q
 
     def __init__(self, device: str | torch.device = "cpu",
@@ -73,10 +80,12 @@ class GR1Spec:
         self.fk = GR1FK(urdf_path, device=device, dtype=dtype)
         self.colliders = RobotColliders(urdf_path)
 
-        self.keypoint_links: tuple[str, ...] = KEYPOINTS_LEFT + KEYPOINTS_RIGHT
-        n_left = len(KEYPOINTS_LEFT)
+        left = KEYPOINTS_LEFT + FINGERTIPS_LEFT
+        right = KEYPOINTS_RIGHT + FINGERTIPS_RIGHT
+        self.keypoint_links: tuple[str, ...] = left + right
+        n_left = len(left)
 
-        # ---- joint limits (17,); GR1FK has no effort data -> no EFFORT_LIMITS
+        # ---- joint limits (29,); GR1FK has no effort data -> no EFFORT_LIMITS
         self.q_lo = self.fk.q_lo.clone()
         self.q_hi = self.fk.q_hi.clone()
         self.vel_limits: torch.Tensor | None = self.fk.q_vel_max.clone()
@@ -87,8 +96,8 @@ class GR1Spec:
             [self.fk.bone_pairs_left, self.fk.bone_pairs_right + n_left], dim=0)
         self.bone_lengths = torch.cat(
             [self.fk.bone_lengths_left, self.fk.bone_lengths_right], dim=0)
-        # No arm bone is degenerate at rest (shortest measured 0.023 m, far
-        # above DEGENERATE_BONE_M): the default threshold drops nothing.
+        # Every remaining bone is an arm segment: GR1FK builds none that end on a
+        # fingertip, and the shortest arm bone measures 0.023 m.
         mask = rigid_bone_mask(self.bone_lengths)
         self.rigid_bone_pairs = self.bone_pairs[mask]
         self.rigid_bone_lengths = self.bone_lengths[mask]
@@ -101,7 +110,7 @@ class GR1Spec:
     # ------------------------------------------------------------------ #
     def forward_kinematics(self, q: torch.Tensor,
                            aux: Any | None = None) -> torch.Tensor:
-        """``(B,T,17) -> (B,T,12,3)``. ``aux`` is unused (reserved for hand DoF;
+        """``(B,T,29) -> (B,T,22,3)``. ``aux`` is unused (reserved for hand DoF;
         """
         left = self.fk.keypoints_fk(q, "left")
         right = self.fk.keypoints_fk(q, "right")
@@ -109,7 +118,7 @@ class GR1Spec:
 
     def forward_transforms(self, q: torch.Tensor, aux: Any | None = None
                            ) -> tuple[torch.Tensor, torch.Tensor]:
-        """``(B,T,17) -> P (B,T,12,3), R (B,T,12,3,3)``. ``aux`` unused, see above."""
+        """``(B,T,29) -> P (B,T,22,3), R (B,T,22,3,3)``. ``aux`` unused, see above."""
         p_l, r_l = self.fk.forward_transforms(q, "left")
         p_r, r_r = self.fk.forward_transforms(q, "right")
         return torch.cat([p_l, p_r], dim=2), torch.cat([r_l, r_r], dim=2)

@@ -12,7 +12,7 @@ robots:
     keypoints: 12
   fourier_gr1:
     embodiment: humanoid
-    keypoints: 12
+    keypoints: 22
   synthetic_2r:
     embodiment: single_arm
     keypoints: 3
