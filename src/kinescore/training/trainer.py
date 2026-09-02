@@ -19,12 +19,15 @@ from kinescore.heads.blocks import masked_smooth_l1
 from kinescore.training.cache import assert_real_joint_source, load_cache
 
 __all__ = [
-    "DEFAULT_JOINT_KEY", "Episode", "TrainConfig", "TrainResult",
+    "DEFAULT_JOINT_KEY", "DEFAULT_GRIPPER_KEY", "Episode", "TrainConfig", "TrainResult",
     "KeypointTrainer",
 ]
 
 #: Annotation key holding the logged joint array.
 DEFAULT_JOINT_KEY = "observation.state.joint_position"
+
+#: Annotation key holding the logged gripper opening, where the corpus has one.
+DEFAULT_GRIPPER_KEY = "observation.state.gripper_position"
 
 #: One loaded episode: ``(cache_path, target (T, K, 3) fp32)``. Tokens are read
 #: from ``cache_path`` a window at a time; see :meth:`KeypointTrainer.read_window`.
@@ -229,15 +232,24 @@ class KeypointTrainer:
             p = robot.forward_kinematics(q0, None)
         return int(p.shape[-2])
 
-    def build_target(self, q: torch.Tensor) -> torch.Tensor:
-        """``(T, n_joints)`` logged joints -> ``(T, K, 3)`` keypoints, metres."""
+    def build_target(self, q: torch.Tensor,
+                     gripper: torch.Tensor | None = None) -> torch.Tensor:
+        """``(T, n_joints)`` logged joints -> ``(T, K, 3)`` keypoints, metres.
+
+        A robot whose gripper travels outside ``q`` places its finger keypoints
+        from ``gripper`` instead. Leaving it out pins those keypoints at the
+        closed pose for every frame, so a reader trained that way learns finger
+        positions that contradict the pixels whenever the hand is open.
+        """
         device = self.robot.q_lo.device
+        aux = None if gripper is None else gripper[:, None].to(device)
         with torch.no_grad():
-            p = self.robot.forward_kinematics(q[:, None].to(device), None)
+            p = self.robot.forward_kinematics(q[:, None].to(device), aux)
         return p[:, 0].detach().cpu().float()
 
     def load_episodes(self, cache_root: str, annotation_root: str, split: str, *,
-                      joint_key: str = DEFAULT_JOINT_KEY, limit: int = 0,
+                      joint_key: str = DEFAULT_JOINT_KEY,
+                      gripper_key: str = DEFAULT_GRIPPER_KEY, limit: int = 0,
                       progress=None) -> list[Episode]:
         """Load ``{cache_root}/{split}/*.pt`` with their annotations.
 
@@ -249,6 +261,10 @@ class KeypointTrainer:
             Split name.
         joint_key:
             Annotation key for the joint array.
+        gripper_key:
+            Annotation key for the gripper opening. Absent from an annotation
+            means the robot has no gripper channel, and the target is built
+            without one.
         limit:
             Cap on episodes loaded, after sorting. ``0`` means all.
         progress:
@@ -277,7 +293,12 @@ class KeypointTrainer:
                                        view_layout=self.view_layout, mmap=True)
             q = torch.tensor(np.asarray(label[joint_key], dtype=np.float32))
             t = min(int(header.n_frames), int(q.shape[0]))
-            episodes.append((fp, self.build_target(q[:t])))
+            raw = label.get(gripper_key)
+            grip = None
+            if raw is not None:
+                grip = self._normalise_gripper(
+                    torch.tensor(np.asarray(raw, dtype=np.float32))[:t])
+            episodes.append((fp, self.build_target(q[:t], grip)))
             if progress and len(episodes) % 200 == 0:
                 progress(f"[{split}] loaded {len(episodes)}/{len(files)} episodes")
 
@@ -288,6 +309,22 @@ class KeypointTrainer:
         if progress:
             progress(f"[{split}] {len(episodes)} episodes loaded")
         return episodes
+
+    @staticmethod
+    def _normalise_gripper(grip: torch.Tensor) -> torch.Tensor:
+        """Logged gripper values as the ``[0, 1]`` opening ``aux`` expects.
+
+        Corpora log the opening in their own units: metres of finger travel for
+        one robot, an already-normalised fraction for another. A channel that
+        stays inside ``[0, 1]`` is taken as the fraction it already is -- scaling
+        it by the widest opening in the episode would read a hand that only ever
+        half-opened as one that opened fully. A channel that leaves that range is
+        in the robot's own units and is divided by its widest opening.
+        """
+        grip = grip.reshape(grip.shape[0], -1)
+        top = grip.amax(dim=0, keepdim=True)
+        scale = torch.where(top > 1.0, top, torch.ones_like(top))
+        return (grip / scale).clamp(0.0, 1.0)
 
     def preload(self, episodes: list[Episode], *, progress=None) -> int:
         """Read ``episodes``' tokens into RAM and return the bytes held.

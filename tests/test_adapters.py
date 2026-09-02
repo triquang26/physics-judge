@@ -90,9 +90,15 @@ class TestColumns:
 
     def test_a_gripper_column_is_sliced_out_of_the_state(self, tmp_path):
         _dataset(tmp_path, "mv", state=np.arange(4 * 8).reshape(4, 8))
-        (episode,) = _read(tmp_path, joint_columns=(0, 1), gripper_column=7)
+        (episode,) = _read(tmp_path, joint_columns=(0, 1), gripper_columns=(7,))
         assert episode.gripper is not None
-        assert episode.gripper.tolist() == [7.0, 15.0, 23.0, 31.0]
+        assert episode.gripper.tolist() == [[7.0], [15.0], [23.0], [31.0]]
+
+    def test_two_grippers_are_sliced_in_the_order_declared(self, tmp_path):
+        _dataset(tmp_path, "mv", state=np.arange(4 * 8).reshape(4, 8))
+        (episode,) = _read(tmp_path, joint_columns=(0, 1), gripper_columns=(6, 7))
+        assert episode.gripper.tolist() == [[6.0, 7.0], [14.0, 15.0],
+                                            [22.0, 23.0], [30.0, 31.0]]
 
     def test_a_gripper_field_is_read_from_its_own_column(self, tmp_path):
         _dataset(tmp_path, "mv", extra={"gripper": np.arange(4.0)})
@@ -171,9 +177,9 @@ class TestSkips:
 
     def test_a_gripper_column_past_the_state_is_reported(self, tmp_path):
         _dataset(tmp_path, "mv", state=np.zeros((4, 4)))
-        (entry,) = _read(tmp_path, gripper_column=9)
+        (entry,) = _read(tmp_path, gripper_columns=(9,))
         assert isinstance(entry, SkippedEpisode)
-        assert "gripper_column 9" in entry.reason
+        assert "gripper_columns [9]" in entry.reason
 
     def test_a_missing_video_is_reported(self, tmp_path):
         _dataset(tmp_path, "mv", videos=("cam_high",))

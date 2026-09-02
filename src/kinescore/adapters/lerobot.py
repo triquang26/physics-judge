@@ -116,15 +116,16 @@ class LeRobotAdapter:
                 joints = state[:, list(cols)] if cols else state
 
                 gripper = None
-                if source.gripper_column is not None:
-                    if source.gripper_column >= state.shape[1]:
+                if source.gripper_columns:
+                    past = [c for c in source.gripper_columns if c >= state.shape[1]]
+                    if past:
                         yield SkippedEpisode(
                             episode_id,
-                            f"gripper_column {source.gripper_column} is past "
-                            f"the {state.shape[1]} columns of "
+                            f"gripper_columns {past} are past the "
+                            f"{state.shape[1]} columns of "
                             f"{source.joint_field!r}", str(parquet))
                         continue
-                    gripper = state[:, source.gripper_column]
+                    gripper = state[:, list(source.gripper_columns)]
                 elif source.gripper_field:
                     grip = _column(table, source.gripper_field)
                     if grip is not None:

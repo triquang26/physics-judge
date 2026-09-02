@@ -9,7 +9,7 @@ _corpus_bimanual_mv: &bimanual_mv
   cameras: [cam_high, cam_low, cam_left_wrist, cam_right_wrist]
   joint_field: observation.state
   joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
-  gripper_column: 6
+  gripper_columns: [6, 13]
 
 _corpus_bimanual_sv: &bimanual_sv
   corpus: bimanual_sv
@@ -18,7 +18,7 @@ _corpus_bimanual_sv: &bimanual_sv
   cameras: [cam_high]
   joint_field: observation.state
   joint_columns: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
-  gripper_column: 6
+  gripper_columns: [6, 13]
 
 _corpus_humanoid_mv: &humanoid_mv
   corpus: humanoid_mv
@@ -35,7 +35,8 @@ _corpus_humanoid_sv: &humanoid_sv
   root: ${KINESCORE_DATA_ROOT}/corpus/humanoid/singleview
   cameras: [ego_view_freq20]
   joint_field: observation.state
-  joint_columns: [0, 1, 2, 3, 4, 5, 6, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43]
+  joint_columns: [0, 1, 2, 3, 4, 5, 6, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43,
+                  7, 8, 9, 10, 11, 12, 29, 30, 31, 32, 33, 34]
   scene_key: episode
 
 # Galaxea A1X singleview (makovian splits only -- non_makovian's
@@ -49,7 +50,7 @@ _corpus_a1x_sv: &a1x_sv
   cameras: [global]
   joint_field: observation.state
   joint_columns: [0, 1, 2, 3, 4, 5]
-  gripper_column: 6
+  gripper_columns: [6]
   scene_key: episode
 
 # DROID-style Franka multiview: the two exterior cameras are static, the

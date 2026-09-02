@@ -64,11 +64,12 @@ class TrainSource:
     joint_columns:
         Which of that array's columns are the robot's joints, in the robot's
         canonical order. Empty means every column, in order.
-    gripper_column:
-        Column of ``joint_field`` holding gripper opening, or ``None``.
+    gripper_columns:
+        Columns of ``joint_field`` holding gripper opening, one per gripper.
+        Empty when the robot has none there.
     gripper_field:
         A separate field holding gripper opening, for corpora that store it
-        outside ``joint_field``. Ignored when ``gripper_column`` is set.
+        outside ``joint_field``. Ignored when ``gripper_columns`` is set.
     scene_key:
         How an episode's scene is derived for the scene-disjoint split.
         ``"prefix"`` takes the episode id up to its last ``__``, the
@@ -85,7 +86,7 @@ class TrainSource:
     cameras: tuple[str, ...] = ()
     joint_field: str = "observation.state"
     joint_columns: tuple[int, ...] = ()
-    gripper_column: int | None = None
+    gripper_columns: tuple[int, ...] = ()
     gripper_field: str = ""
     scene_key: str = "prefix"
 
@@ -237,7 +238,7 @@ class Registry:
 
 def _train_from_entry(reader_id: str, entry: dict[str, Any]) -> TrainSource:
     unknown = set(entry) - {"corpus", "adapter", "root", "cameras",
-                            "joint_field", "joint_columns", "gripper_column",
+                            "joint_field", "joint_columns", "gripper_columns",
                             "gripper_field", "scene_key"}
     if unknown:
         raise ValueError(
@@ -249,8 +250,7 @@ def _train_from_entry(reader_id: str, entry: dict[str, Any]) -> TrainSource:
         cameras=tuple(str(c) for c in entry.get("cameras", ())),
         joint_field=str(entry.get("joint_field", "observation.state")),
         joint_columns=tuple(int(i) for i in entry.get("joint_columns", ())),
-        gripper_column=(None if entry.get("gripper_column") is None
-                        else int(entry["gripper_column"])),
+        gripper_columns=tuple(int(i) for i in entry.get("gripper_columns", ())),
         gripper_field=str(entry.get("gripper_field", "")),
         scene_key=str(entry.get("scene_key", "prefix")),
     )
