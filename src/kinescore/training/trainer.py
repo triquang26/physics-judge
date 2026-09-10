@@ -15,7 +15,6 @@ import torch
 from kinescore.core.clip import ViewLayout
 from kinescore.core.robot import RobotSpec
 from kinescore.heads import DiffusionKeypointHead
-from kinescore.heads.blocks import masked_smooth_l1
 from kinescore.training.cache import assert_real_joint_source, load_cache
 
 __all__ = [
@@ -106,9 +105,12 @@ class TrainConfig:
         the schedule.
     weight_decay:
         AdamW decay.
+    loss:
+        ``"smooth_l1"`` or ``"mse"``.
     huber_beta:
         Smooth-L1 transition point, metres. Below it the loss is quadratic, so
         sub-centimetre error is not swamped by the occasional gross miss.
+        Unused when ``loss="mse"``.
     workspace_margin:
         Headroom, as a fraction of each axis' span, left around the training
         targets when a head is calibrated against them.
@@ -140,6 +142,7 @@ class TrainConfig:
     lr_late: float = 5e-4
     lr_step_at: int = 1500
     weight_decay: float = 1e-4
+    loss: str = "smooth_l1"
     huber_beta: float = 0.05
     workspace_margin: float = 0.05
     seed: int = 0
@@ -453,11 +456,6 @@ class KeypointTrainer:
         return (torch.stack(fb).to(device).float(), torch.stack(yb).to(device),
                 torch.stack(mb).to(device))
 
-    def compute_loss(self, pred: torch.Tensor, target: torch.Tensor,
-                     mask: torch.Tensor) -> torch.Tensor:
-        """Smooth-L1 over real frames only."""
-        return masked_smooth_l1(pred, target, mask, beta=self.cfg.huber_beta)
-
     @torch.no_grad()
     def evaluate(self, head: DiffusionKeypointHead, episodes: list[Episode]) -> dict:
         """Root-mean-square per-keypoint 3-D error, millimetres."""
@@ -522,7 +520,8 @@ class KeypointTrainer:
         head.train()
         for step in range(1, cfg.steps + 1):
             f, y, m = self._sample_windows(train_episodes, gen=gen, device=device)
-            loss = head.training_loss(f, y, m, beta=cfg.huber_beta)
+            loss = head.training_loss(f, y, m, beta=cfg.huber_beta,
+                                      loss=cfg.loss)
 
             opt.zero_grad()
             loss.backward()

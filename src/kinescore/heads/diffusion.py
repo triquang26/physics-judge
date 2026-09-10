@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from kinescore.heads.blocks import (
     KeypointQueryDecoder,
     TemporalEncoder,
+    masked_mse,
     masked_smooth_l1,
     temporal_tracks,
 )
@@ -248,16 +249,27 @@ class DiffusionKeypointHead(nn.Module):
         return x_t + self.x0_head(self.out_norm(z))
 
     def training_loss(self, feat: torch.Tensor, target: torch.Tensor,
-                      mask: torch.Tensor, *, beta: float = 0.05
-                     ) -> torch.Tensor:
-        """Masked smooth-L1 on the clean points recovered from noised targets.
+                      mask: torch.Tensor, *, beta: float = 0.05,
+                      loss: str = "smooth_l1") -> torch.Tensor:
+        """Masked regression loss on the clean points recovered from noised targets.
+
+        Args:
+            loss: ``"smooth_l1"`` (default) or ``"mse"``. ``beta`` applies to
+                smooth-L1 only, rescaled into workspace units.
+
+        Raises:
+            ValueError: If ``loss`` is neither.
         """
+        if loss not in ("smooth_l1", "mse"):
+            raise ValueError(f"loss must be 'smooth_l1' or 'mse', got {loss!r}")
         x0 = self.workspace.encode(target)
         t = torch.rand(x0.shape[0], device=x0.device).clamp_min(1e-4)
         ab = self.schedule.alpha_bar(t).reshape(-1, 1, 1, 1)
         x_t = ab.sqrt() * x0 + (1.0 - ab).sqrt() * torch.randn_like(x0)
         k, v = self.decoder.keys_values(feat)
         x0_hat = self._denoise(x_t, t, k, v)
+        if loss == "mse":
+            return masked_mse(x0_hat, x0, mask)
         scale = float(self.workspace.half_extent.mean())
         return masked_smooth_l1(x0_hat, x0, mask, beta=beta / scale)
 

@@ -271,11 +271,47 @@ def test_rigid_idx_can_exclude_a_bone() -> None:
 
     for det in (full, narrowed):
         det.fit([ctx_gt])
-        scores = det.per_frame(ctx_gt)
-        det.calibrate(scores, pct=95.0, floor=18.0)
+        det.calibrate([ctx_gt], pct=95.0, floor=18.0)
 
     warped = _warp_clip(P, d12, (8, 11), extra_m=0.05)
     ctx_warp = _clip_ctx(warped, robot)
 
     assert full._intervals(full._flag(full.per_frame(ctx_warp))) != []
     assert narrowed._intervals(narrowed._flag(narrowed.per_frame(ctx_warp))) == []
+
+
+def test_a_segment_verdict_is_judged_on_a_segment_calibrated_threshold() -> None:
+    """Each detector carries a threshold on the scale its verdict compares.
+
+    A verdict reduces a segment before thresholding, so calibrating only the
+    per-frame percentile judges two different quantities against one number:
+    a ``worst``-reduced detector then over-fires and a ``median``-reduced one
+    under-fires. Both thresholds are fitted on the same GT clips.
+    """
+    robot = _chain_robot()
+    gt = [_clip_ctx(_rigid_chain(64, phase=ph)[0], robot)
+          for ph in (-0.10, 0.0, 0.10)]
+
+    scorer = ViolationScorer()
+    scorer.calibrate(gt, pct=95.0)
+    thr = scorer.thresholds()
+
+    for name in ("rigidity", "jerk"):
+        assert thr[name]["segment_threshold"] is not None
+
+    # worst-reduce lifts every frame in a window to its extreme, so the
+    # segment percentile sits at or above the per-frame one; median-reduce
+    # pulls it the other way.
+    assert thr["jerk"]["segment_reduce"] == "worst"
+    assert thr["jerk"]["segment_threshold"] >= thr["jerk"]["threshold"]
+    assert thr["rigidity"]["segment_reduce"] == "median"
+
+
+def test_segment_report_reads_the_segment_threshold() -> None:
+    from kinescore.violations import segments
+
+    violations = {"jerk": {"threshold": 1.0, "segment_threshold": 100.0,
+                           "per_frame": [10.0] * 16}}
+    entry = segments.report(violations, ["jerk"])[0]["detectors"]["jerk"]
+    assert entry["threshold"] == 100.0
+    assert entry["violated"] is False

@@ -19,6 +19,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--lr-late", type=float, default=5e-4)
     parser.add_argument("--lr-step-at", type=int, default=1500)
+    parser.add_argument("--loss", choices=("smooth_l1", "mse"),
+                        default="smooth_l1")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--read-workers", type=int, default=16,
                         help="threads reading token windows for one batch")
@@ -130,7 +132,7 @@ def run(args: argparse.Namespace) -> int:
     cfg = TrainConfig(
         steps=args.steps, batch_size=args.batch_size,
         window_size=args.window_size, lr=args.lr, lr_late=args.lr_late,
-        lr_step_at=args.lr_step_at, seed=args.seed,
+        lr_step_at=args.lr_step_at, loss=args.loss, seed=args.seed,
         read_workers=args.read_workers, preload=args.preload,
         buffer_bytes=int(args.buffer_gb * 2**30),
         buffer_refresh=args.buffer_refresh,

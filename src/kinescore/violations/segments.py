@@ -17,16 +17,6 @@ def bounds(n_frames: int, length: int = SEGMENT_LEN) -> list[tuple[int, int]]:
             for i in range(0, n_frames, max(1, length))]
 
 
-def _reduce(values: list[float], how: str, higher_is_worse: bool) -> float:
-    if how == "median":
-        ordered = sorted(values)
-        mid = len(ordered) // 2
-        if len(ordered) % 2:
-            return ordered[mid]
-        return 0.5 * (ordered[mid - 1] + ordered[mid])
-    return max(values) if higher_is_worse else min(values)
-
-
 def report(violations: dict, names, length: int = SEGMENT_LEN) -> list[dict]:
     """One entry per segment, carrying each named detector's verdict."""
     from kinescore.violations import DETECTORS
@@ -42,11 +32,12 @@ def report(violations: dict, names, length: int = SEGMENT_LEN) -> list[dict]:
         for name in names:
             window = series[name][start:end + 1]
             detector = spec.get(name)
-            threshold = (violations.get(name) or {}).get("threshold")
+            report_d = violations.get(name) or {}
+            threshold = report_d.get("segment_threshold",
+                                     report_d.get("threshold"))
             if not window or detector is None or threshold is None:
                 continue
-            value = _reduce(window, detector.segment_reduce,
-                            detector.higher_is_worse)
+            value = detector.reduce_window(window)
             violated = (value > threshold if detector.higher_is_worse
                         else value < threshold)
             entry["detectors"][name] = {

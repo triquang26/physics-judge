@@ -95,6 +95,16 @@ class TestTrainingLoss:
         loss = head.training_loss(feat, target, mask * 0.0, beta=0.05)
         assert float(loss.detach()) == 0.0
 
+    def test_mse_is_selectable(self):
+        head = _head()
+        loss = head.training_loss(*self._batch(head), loss="mse")
+        assert loss.shape == () and torch.isfinite(loss)
+
+    def test_an_unknown_loss_is_refused(self):
+        head = _head()
+        with pytest.raises(ValueError, match="smooth_l1"):
+            head.training_loss(*self._batch(head), loss="l1")
+
 
 class TestDenoiser:
     def test_an_untrained_head_returns_what_it_was_handed(self):

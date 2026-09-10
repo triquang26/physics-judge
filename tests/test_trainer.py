@@ -11,6 +11,7 @@ import pytest
 import torch
 
 from kinescore.core.clip import ViewLayout
+from kinescore.heads.blocks import masked_smooth_l1
 from kinescore.heads.diffusion import DiffusionKeypointHead
 from kinescore.robots import get_robot
 from kinescore.training.cache import CACHE_SCHEMA_VERSION, CacheHeader, write_cache
@@ -87,21 +88,19 @@ class TestTargets:
 
 class TestLoss:
     def test_padded_frames_do_not_enter_the_loss(self, robot):
-        trainer = _trainer(robot)
         k = KeypointTrainer.n_keypoints(robot)
         pred = torch.zeros(1, 4, k, 3)
         target = torch.zeros(1, 4, k, 3)
         target[0, 2:] = 1e3  # padding, masked out
         mask = torch.tensor([[1.0, 1.0, 0.0, 0.0]])
-        assert float(trainer.compute_loss(pred, target, mask)) == 0.0
+        assert float(masked_smooth_l1(pred, target, mask, beta=0.05)) == 0.0
 
     def test_error_on_real_frames_is_counted(self, robot):
-        trainer = _trainer(robot)
         k = KeypointTrainer.n_keypoints(robot)
         pred = torch.zeros(1, 2, k, 3)
         target = torch.full((1, 2, k, 3), 0.5)
         mask = torch.ones(1, 2)
-        assert float(trainer.compute_loss(pred, target, mask)) > 0.0
+        assert float(masked_smooth_l1(pred, target, mask, beta=0.05)) > 0.0
 
 
 class TestLoop:

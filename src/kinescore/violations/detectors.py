@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from kinescore.core.context import ClipContext
+from kinescore.violations.segments import SEGMENT_LEN, bounds
 
 __all__ = [
     "Detector",
@@ -49,6 +50,7 @@ class Detector:
 
     def __init__(self) -> None:
         self.threshold: float | None = None
+        self.segment_threshold: float | None = None
 
     def per_frame(self, ctx: ClipContext) -> np.ndarray:
         """Per-frame score ``(T,)`` for one clip. Must be overridden."""
@@ -58,13 +60,40 @@ class Detector:
         """Learn detector-specific state from GT clips, before :meth:`calibrate`.
         """
 
-    def calibrate(self, gt_scores: np.ndarray, pct: float = 95.0,
-                  floor: float = 0.0) -> None:
-        """Set ``self.threshold`` from a pooled GT per-frame score array."""
+    def reduce_window(self, values: Sequence[float]) -> float:
+        """Reduce one segment's per-frame scores to the number a verdict judges."""
+        if self.segment_reduce == "median":
+            return float(np.median(np.asarray(values, dtype=float)))
+        return float(max(values) if self.higher_is_worse else min(values))
+
+    def segment_scores(self, ctx: ClipContext,
+                       length: int = SEGMENT_LEN) -> np.ndarray:
+        """Segment-reduced scores ``(n_segments,)`` for one clip."""
+        s = self.per_frame(ctx)
+        return np.array([self.reduce_window(s[a:b + 1])
+                         for a, b in bounds(len(s), length)], dtype=float)
+
+    def _cut(self, scores: np.ndarray, pct: float, floor: float) -> float:
         if self.higher_is_worse:
-            self.threshold = float(max(floor, np.percentile(gt_scores, pct)))
-        else:
-            self.threshold = float(np.percentile(gt_scores, 100.0 - pct))
+            return float(max(floor, np.percentile(scores, pct)))
+        return float(np.percentile(scores, 100.0 - pct))
+
+    def calibrate(self, gt_contexts: Sequence[ClipContext], pct: float = 95.0,
+                  floor: float = 0.0, segment_len: int = SEGMENT_LEN) -> None:
+        """Set both thresholds from GT: one per-frame, one segment-reduced.
+
+        A verdict compares a segment-reduced value, so its threshold has to be
+        the percentile of that same reduced quantity. ``self.threshold`` stays
+        per-frame: the flagged fraction and intervals in :meth:`report` are
+        per-frame quantities.
+        """
+        frame = (np.concatenate([self.per_frame(c) for c in gt_contexts])
+                 if gt_contexts else np.array([0.0]))
+        segment = (np.concatenate([self.segment_scores(c, segment_len)
+                                   for c in gt_contexts])
+                   if gt_contexts else np.array([0.0]))
+        self.threshold = self._cut(frame, pct, floor)
+        self.segment_threshold = self._cut(segment, pct, 0.0)
 
     def _flag(self, s: np.ndarray) -> np.ndarray:
         if self.threshold is None:
@@ -96,6 +125,8 @@ class Detector:
         return {
             "units": self.units,
             "threshold": round(float(self.threshold), 2),
+            "segment_threshold": round(float(self.segment_threshold), 2),
+            "segment_reduce": self.segment_reduce,
             "fraction": round(float(flag.mean()), 3),
             "n_flagged": int(flag.sum()),
             "severity_ratio_median": round(float(np.median(ratio)), 3),

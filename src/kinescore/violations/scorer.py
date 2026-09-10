@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import numpy as np
-
 from kinescore.core.context import ClipContext
 from kinescore.violations.detectors import (
     Detector,
@@ -14,15 +12,17 @@ from kinescore.violations.detectors import (
     SelfCollisionDetector,
     TeleportDetector,
 )
+from kinescore.violations.segments import SEGMENT_LEN
 
 __all__ = ["DETECTORS", "HEADLINE", "ViolationScorer"]
 
-#: Per-detector calibration floor (same units as the detector), keyed by
+#: Per-detector floor on the *per-frame* threshold (detector units), keyed by
 #: ``Detector.name``. A near-zero GT spread on rigidity/joint_limit otherwise
 #: calibrates a threshold so tight it flags real, violation-free motion.
 #: ``self_collision`` is ``higher_is_worse=False`` (lower distance = worse), so
 #: a floor there would loosen exactly the bound calibration tightens -- it has
-#: none. See ``Detector.calibrate``.
+#: none. The segment threshold takes no floor: reducing a segment before
+#: thresholding already removes the single-frame noise a floor guards against.
 _CALIBRATION_FLOOR = {"rigidity": 18.0, "joint_limit": 3.0}
 
 
@@ -67,20 +67,22 @@ class ViolationScorer:
     def __init__(self, detectors: Sequence[Detector] | None = None) -> None:
         self.detectors = list(detectors) if detectors is not None else _default_detectors()
 
-    def calibrate(self, gt_contexts: Sequence[ClipContext], pct: float = 95.0) -> None:
-        """Fit + threshold every detector against pooled GT per-frame scores.
-        """
+    def calibrate(self, gt_contexts: Sequence[ClipContext], pct: float = 95.0,
+                  segment_len: int = SEGMENT_LEN) -> None:
+        """Fit + threshold every detector against pooled GT clips."""
         for det in self.detectors:
             det.fit(gt_contexts)
-            scores = (np.concatenate([det.per_frame(c) for c in gt_contexts])
-                      if gt_contexts else np.array([0.0]))
-            floor = _CALIBRATION_FLOOR.get(det.name, 0.0)
-            det.calibrate(scores, pct=pct, floor=floor)
+            det.calibrate(gt_contexts, pct=pct,
+                          floor=_CALIBRATION_FLOOR.get(det.name, 0.0),
+                          segment_len=segment_len)
 
     def thresholds(self) -> dict:
-        """``{detector_name: {"units": ..., "threshold": ...}}`` for every detector."""
+        """``{detector_name: {units, threshold, segment_threshold}}``, all detectors."""
         return {
-            d.name: {"units": d.units, "threshold": round(float(d.threshold), 2)}
+            d.name: {"units": d.units,
+                     "threshold": round(float(d.threshold), 2),
+                     "segment_threshold": round(float(d.segment_threshold), 2),
+                     "segment_reduce": d.segment_reduce}
             for d in self.detectors
         }
 

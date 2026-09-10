@@ -4,6 +4,9 @@
 # directories in {metas, t5_xxl, videos} shape: those train the video
 # generators, carry no robot state, and cannot supervise a keypoint head.
 
+# Only the `dreamgen` branch. `dreamdojo` ships 640x480 letterboxed frames
+# (bimanual) or a side-by-side GT|pred 1280x480 (humanoid, single_arm); neither
+# matches a view any reader holds.
 sources:
   bench:
     repo: doanh25032004/video_gen_physics
@@ -22,7 +25,10 @@ sources:
   fastercache:
     repo: doanh25032004/video_gen_physics
     include: ["fastercache/humanoid/output/singleview/*",
-              "fastercache/humanoid/output/multiview/*"]
+              "fastercache/humanoid/output/multiview/*",
+              "fastercache/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "fastercache/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "fastercache/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench
 
   cosmos:
@@ -36,12 +42,16 @@ sources:
     repo: doanh25032004/video_gen_physics
     include: ["radial/single_arm/output/singleview/*",
               "radial/single_arm/output/multiview/*",
-              "radial/bimanual/output/singleview/*"]
+              "radial/bimanual/output/singleview/*",
+              "radial/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "radial/bimanual/output/singleview/dreamgen/non_makovian/**"]
     dest: bench
 
   dense:
     repo: doanh25032004/video_gen_physics
-    include: ["dense/single_arm/output/singleview/*"]
+    include: ["dense/single_arm/output/singleview/*",
+              "dense/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "dense/bimanual/output/singleview/dreamgen/non_makovian/**"]
     dest: bench
 
   # The remaining generators, one entry each. Every one ships the same
@@ -51,48 +61,69 @@ sources:
     repo: doanh25032004/video_gen_physics
     include: ["itm/humanoid/output/singleview/dreamgen/makovian/**",
               "itm/bimanual/output/singleview/dreamgen/makovian/**",
-              "itm/single_arm/output/singleview/dreamgen/makovian/**"]
+              "itm/single_arm/output/singleview/dreamgen/makovian/**",
+              "itm/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "itm/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "itm/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 
   sito:
     repo: doanh25032004/video_gen_physics
     include: ["sito/humanoid/output/singleview/dreamgen/makovian/**",
               "sito/bimanual/output/singleview/dreamgen/makovian/**",
-              "sito/single_arm/output/singleview/dreamgen/makovian/**"]
+              "sito/single_arm/output/singleview/dreamgen/makovian/**",
+              "sito/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "sito/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "sito/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 
   dicache:
     repo: doanh25032004/video_gen_physics
     include: ["dicache/humanoid/output/singleview/dreamgen/makovian/**",
               "dicache/bimanual/output/singleview/dreamgen/makovian/**",
-              "dicache/single_arm/output/singleview/dreamgen/makovian/**"]
+              "dicache/single_arm/output/singleview/dreamgen/makovian/**",
+              "dicache/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "dicache/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "dicache/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 
   pisa:
     repo: doanh25032004/video_gen_physics
     include: ["pisa/humanoid/output/singleview/dreamgen/makovian/**",
               "pisa/bimanual/output/singleview/dreamgen/makovian/**",
-              "pisa/single_arm/output/singleview/dreamgen/makovian/**"]
+              "pisa/single_arm/output/singleview/dreamgen/makovian/**",
+              "pisa/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "pisa/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "pisa/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 
   svg1:
     repo: doanh25032004/video_gen_physics
     include: ["svg1/humanoid/output/singleview/dreamgen/makovian/**",
               "svg1/bimanual/output/singleview/dreamgen/makovian/**",
-              "svg1/single_arm/output/singleview/dreamgen/makovian/**"]
+              "svg1/single_arm/output/singleview/dreamgen/makovian/**",
+              "svg1/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "svg1/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "svg1/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 
   svg2:
     repo: doanh25032004/video_gen_physics
     include: ["svg2/humanoid/output/singleview/dreamgen/makovian/**",
               "svg2/bimanual/output/singleview/dreamgen/makovian/**",
-              "svg2/single_arm/output/singleview/dreamgen/makovian/**"]
+              "svg2/single_arm/output/singleview/dreamgen/makovian/**",
+              "svg2/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "svg2/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "svg2/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 
   worldcache:
     repo: doanh25032004/video_gen_physics
     include: ["worldcache/humanoid/output/singleview/dreamgen/makovian/**",
               "worldcache/bimanual/output/singleview/dreamgen/makovian/**",
-              "worldcache/single_arm/output/singleview/dreamgen/makovian/**"]
+              "worldcache/single_arm/output/singleview/dreamgen/makovian/**",
+              "worldcache/humanoid/output/singleview/dreamgen/non_makovian/**",
+              "worldcache/bimanual/output/singleview/dreamgen/non_makovian/**",
+              "worldcache/single_arm/output/singleview/dreamgen/non_makovian/**"]
     dest: bench/methods
 

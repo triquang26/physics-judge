@@ -7,17 +7,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["KeypointQueryDecoder", "TemporalEncoder",
+__all__ = ["KeypointQueryDecoder", "TemporalEncoder", "masked_mse",
            "masked_smooth_l1", "temporal_tracks"]
+
+
+def _masked_mean(per_element: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    per_frame = per_element.mean(dim=(-1, -2))
+    return (per_frame * mask).sum() / mask.sum().clamp_min(1e-8)
 
 
 def masked_smooth_l1(pred: torch.Tensor, target: torch.Tensor,
                      mask: torch.Tensor, *, beta: float) -> torch.Tensor:
     """Smooth-L1 between ``(B, T, K, 3)`` tensors over the frames ``mask`` keeps.
     """
-    per_frame = F.smooth_l1_loss(
-        pred, target, beta=beta, reduction="none").mean(dim=(-1, -2))
-    return (per_frame * mask).sum() / mask.sum().clamp_min(1e-8)
+    return _masked_mean(
+        F.smooth_l1_loss(pred, target, beta=beta, reduction="none"), mask)
+
+
+def masked_mse(pred: torch.Tensor, target: torch.Tensor,
+               mask: torch.Tensor) -> torch.Tensor:
+    """Mean squared error between ``(B, T, K, 3)`` tensors, same masking."""
+    return _masked_mean(F.mse_loss(pred, target, reduction="none"), mask)
 
 
 class _CrossBlock(nn.Module):
