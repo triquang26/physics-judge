@@ -7,9 +7,9 @@ out of the pixels; five analytic detectors measure physics violations on those
 keypoints. No simulator, no VLM judge. Two properties make the score
 trustworthy:
 
-- **Non-circular**: the reader is frozen and the evaluated model never
+- Non-circular: the reader is frozen and the evaluated model never
   trained against it.
-- **Calibrated on real motion**: every threshold is the 95th percentile of
+- Calibrated on real motion: every threshold is the 95th percentile of
   the same quantity measured on real teleop from the same robot and packing.
 
 It is a **relative** referee: keypoint accuracy floors at tens of millimetres,
@@ -233,8 +233,7 @@ compare it only within one reader.
 | | |
 |---|---|
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | data, training, scoring, outputs |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | pull, train, score, export, push for all 3 readers |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | modules, the diffusion head, the registry |
-| [`docs/ADDING_A_ROBOT.md`](docs/ADDING_A_ROBOT.md) | adding an embodiment, with the ALOHA walkthrough |
-| [`docs/METRICS.md`](docs/METRICS.md) | detectors, segments, calibration |
-| [`docs/BIMANUAL.md`](docs/BIMANUAL.md) | ALOHA bimanual end-to-end: every command from download to bucket push |
-| [`docs/MULTIVIEW_STATIC.md`](docs/MULTIVIEW_STATIC.md) | Humanoid multiview on the two static cameras: run book + real-motion baseline |
+| [`docs/ADDING_A_ROBOT.md`](docs/ADDING_A_ROBOT.md) | adding an embodiment, with the Franka Panda walkthrough |
+| [`docs/METRICS.md`](docs/METRICS.md) | rigidity and jerk detectors, segments, calibration |
