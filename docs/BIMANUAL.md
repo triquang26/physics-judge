@@ -6,19 +6,19 @@ full run produced (2026-08-25). General flag documentation lives in
 
 ## The embodiment
 
-`aloha_bimanual` — an ALOHA rig: two Interbotix ViperX 300s arms bolted to a
+`aloha_bimanual` is an ALOHA rig: two Interbotix ViperX 300s arms bolted to a
 table. 18 keypoints (9 per arm, shoulder → fingers → TCP), 12 predicted
 joints (6 revolute per arm); each gripper travels through the FK `aux`
 channel, not `q` (see `src/kinescore/robots/aloha/fk.py`).
 
 `observation.state` in both corpora is 14-dim:
-`[left_arm(6), left_gripper, right_arm(6), right_gripper]` — hence
+`[left_arm(6), left_gripper, right_arm(6), right_gripper]`, so
 `joint_columns: [0,1,2,3,4,5,7,8,9,10,11,12]`, `gripper_column: 6` in
 `configs/cells.yaml`.
 
 **Asset**: `$KINESCORE_ASSETS/aloha/urdf/aloha_bimanual.urdf` (29 links,
-28 joints, kinematics-only, ~30 KB). Assets are never vendored in this repo —
-fetch them from the bucket:
+28 joints, kinematics-only, ~30 KB). Assets are never vendored in this repo,
+so fetch them from the bucket:
 
 ```bash
 hf buckets sync hf://buckets/twanghcmut/hallucinate-bench/assets $KINESCORE_ASSETS
@@ -55,8 +55,8 @@ done
 ```
 
 Reference: `aloha_bimanual.bimanual_sv.sv1_16x9` reached `val_mm ≈ 100` at
-6000 steps. Bimanual val_mm runs higher than humanoid — one 768×432 frame
-carries two full arms, so each keypoint gets fewer pixels; compare within the
+6000 steps. Bimanual val_mm runs higher than humanoid: one 768×432 frame
+carries two full arms, so each keypoint gets fewer pixels. Compare within the
 embodiment, not across.
 
 ## 3. Score
@@ -67,7 +67,7 @@ Manifest cell (DreamGen singleview 16:9):
 kinescore score --cell bimanual.sv1_16x9.dreamgen --device cuda
 ```
 
-Radial clips are outside the manifest — same reader, `--videos`:
+Radial clips are outside the manifest. Same reader, via `--videos`:
 
 ```bash
 kinescore score --cell bimanual.sv1_16x9.radial_dreamgen --device cuda \

@@ -1,6 +1,7 @@
 # Reproduce
 
-Empty machine to benchmark table. Every command reads `.env`.
+Empty machine to benchmark table. Every command resolves its paths from the
+process environment, so export `.env` first with `set -a; . .env; set +a`.
 
 ## 0. Environment
 
@@ -15,9 +16,12 @@ export HF_TOKEN=<read token>
 ```
 
 ```bash
-pip install -e .
+uv pip install -e ".[dino,video,bench]"
 hf sync hf://buckets/twanghcmut/hallucinate-bench/asset $KINESCORE_ASSETS
 ```
+
+`huggingface_hub` ships in the `dino` extra, not in the core dependency list,
+so `kinescore pull` fails on import after a bare `pip install -e .`.
 
 ## 1. Pull
 
@@ -61,7 +65,7 @@ Compare val_mm only within a reader.
 
 `score` calibrates before it scores: 24 clips from the reader's own val split,
 95th percentile, one threshold set per cell. No separate step, and no threshold
-is carried between robots. One GPU per cell — a `--videos` tree split across two
+is carried between robots. One GPU per cell: a `--videos` tree split across two
 is judged by two calibrations.
 
 ```bash

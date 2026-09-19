@@ -64,8 +64,9 @@ asked to read before the box is fitted raises.
 
 Training: masked smooth-L1 (`beta = 0.05` m) over `(B, T, K, 3)` windows of
 16 frames, targets from forward kinematics on the logged joints. The head
-predicts keypoints directly rather than joint angles through FK — under FK,
-limb lengths are fixed by construction and rigidity would be identically zero.
+predicts keypoints directly rather than joint angles through FK. Under FK,
+limb lengths are fixed by construction, so rigidity would be identically
+zero.
 
 ## Checkpoints
 
@@ -77,22 +78,29 @@ mismatched head fails before the backbone is built.
 
 ## Robots
 
-| robot | key | joints | keypoints |
-|---|---|---|---|
-| Airbot MMK2 | `airbot_mmk2` | 12 | 12 |
-| Fourier GR-1 | `fourier_gr1` | 17 | 12 |
-| `Synthetic2R` | `synthetic_2r` | 2 | 3 |
+Keypoint counts are what `configs/robots.yaml` declares, and `kinescore train`
+checks each one against what forward kinematics actually returns.
 
-`Synthetic2R` is closed-form, needs no URDF, and is the CPU-only test
-fixture.
+| robot | key | embodiment | keypoints | URDF |
+|---|---|---|---|---|
+| ALOHA 2×vx300s | `aloha_bimanual` | bimanual | 18 | `KINESCORE_ASSETS` |
+| Fourier GR-1 | `fourier_gr1` | humanoid | 22 | `KINESCORE_ASSETS` |
+| Airbot MMK2 | `airbot_mmk2` | humanoid | 12 | `KINESCORE_ASSETS` |
+| Franka Panda | `franka_panda` | single_arm | 8 | `robot_descriptions` package |
+| Galaxea A1X | `a1x_ee` | single_arm | 4 | none, EE pose |
+| `Synthetic2R` | `synthetic_2r` | single_arm | 3 | none, closed form |
+
+`a1x_ee` reads a logged end-effector pose rather than joint angles, so it
+loads no URDF at runtime. `Synthetic2R` is the CPU-only test fixture.
 
 ### Adding a robot
 
-Implement `RobotSpec` (`robots/base.py`): joint names, `build_target`
-(FK: `(T, n_joints)` → `(T, K, 3)` metres), `rigid_bone_pairs`, optional
-colliders. Register it in `robots/__init__.py`, declare it in
-`configs/robots.yaml` with its keypoint count — checked against FK output at
-train time.
+A robot is one Python module under `robots/<name>/` plus three declarations.
+The contract is the `RobotSpec` protocol in `core/robot.py`, and
+`robots/base.py` holds the shared helpers a URDF-driven robot builds on.
+
+See [ADDING_A_ROBOT.md](ADDING_A_ROBOT.md) for the steps, the ALOHA bimanual
+walkthrough, and the list of what fails where.
 
 ## Detector interface
 

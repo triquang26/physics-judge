@@ -21,7 +21,7 @@ the reduced value against the threshold:
 
 | detector | reduce |
 |---|---|
-| `rigidity` | median — a violation must persist, one bad frame is reader noise |
+| `rigidity` | median: a violation must persist, one bad frame is reader noise |
 | every other | worst |
 
 `segments.csv`, the export `segments.json`, and the rendered overlays all
@@ -30,7 +30,7 @@ report at this granularity.
 ## Calibration
 
 `ViolationScorer.calibrate(real_clips, pct=95.0)` pools each detector's
-per-frame scores over real clips (the reader's own val split — motion the head
+per-frame scores over real clips (the reader's own val split, motion the head
 was not fitted on) and sets the threshold at the `pct`-th percentile
 (`(100-pct)`-th for `self_collision`, where smaller is worse). Scoring before
 calibration raises; there is no default threshold.
@@ -40,9 +40,9 @@ error, so without a floor the rigidity threshold would collapse onto the
 reader's own jitter and flag everything.
 
 Consequences: a threshold subtracts the reader's noise floor, so whatever
-survives is motion the reader would not produce on real video — and a cell
-whose reader has worse `val_mm` has looser thresholds, so scores compare
-across cells only when the readers are comparable.
+survives is motion the reader would not produce on real video. A cell whose
+reader has worse `val_mm` has looser thresholds, so scores compare across
+cells only when the readers are comparable.
 
 ### Segment-level baseline on real motion
 
@@ -68,7 +68,7 @@ Measured baselines (real val clips, in-sample with the thresholds):
 
 Read a cell's rate as its **excess over the same reader's baseline**, not
 against zero. A generated set can also sit far *below* the baseline on the
-dynamics detectors (jerk, teleport) — motion smoother than the real robot,
+dynamics detectors (jerk, teleport): motion smoother than the real robot,
 which those detectors do not reward or flag.
 
 ## rigidity
@@ -76,7 +76,7 @@ which those detectors do not reward or flag.
 For each pair in `robot.rigid_bone_pairs`, `|P[:, a] - P[:, b]|` in mm; the
 largest absolute deviation from the URDF rest length across bones, per frame.
 `rigid_bone_pairs` excludes degenerate bones and bones whose endpoint sits on
-a gripper-driven link — their length tracks actuation, not structure.
+a gripper-driven link; their length tracks actuation, not structure.
 
 **Does not detect:** an arm that is the right shape in the wrong place, or a
 warp that preserves every bone length.
@@ -90,16 +90,16 @@ thresholds calibrated at one frame rate apply to clips at another, so a
 per-frame difference would rank the slowest-sampled generator as the jerkiest.
 
 **Does not detect:** smooth but kinematically impossible motion. Reader
-variance also scales with frame rate — score at a fixed, recorded rate.
+variance also scales with frame rate, so score at a fixed, recorded rate.
 
 ## The other three
 
-- `teleport` — first difference / `dt`, worst keypoint per frame. Separates a
+- `teleport`: first difference / `dt`, worst keypoint per frame. Separates a
   single discontinuity from sustained jitter (which jerk carries).
-- `joint_limit` — bend angles vs a `[lo, hi]` envelope fitted on the 1%/99%
+- `joint_limit`: bend angles vs a `[lo, hi]` envelope fitted on the 1%/99%
   quantiles of real motion; scores degrees outside it. The envelope is what
   the corpus shows, not the URDF's declared limits.
-- `self_collision` — minimum distance across non-adjacent keypoint pairs,
+- `self_collision`: minimum distance across non-adjacent keypoint pairs,
   flagged **below** threshold. Only the robot's own keypoints; no environment.
 
 ## Per-clip report fields
@@ -111,7 +111,7 @@ worse), `intervals` (`[start, end]` frame pairs), `per_frame`.
 
 ## What none of them detect
 
-Task success, visual fidelity, object dynamics, contact — anything outside
+Task success, visual fidelity, object dynamics, and contact all sit outside
 the robot's own keypoint set. A clip that passes all five is not physically
 correct; it is a clip in which the arm's own kinematics show no violation
 this reader can see.

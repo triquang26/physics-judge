@@ -9,9 +9,9 @@ full run produced (2026-08-29). General flag documentation lives in
 
 The multiview corpus and the DreamGen/fastercache clips pack four cameras into
 one 768x432 frame as a 2x2 grid of 384x216 panels: top row head +
-third-person, bottom row the two wrist cameras. A wrist camera rides the arm —
-its frame shows the fingers, not where the arm is — so this bench reads the
-two static panels only:
+third-person, bottom row the two wrist cameras. A wrist camera rides the arm,
+so its frame shows the fingers rather than where the arm is. This bench reads
+the two static panels only:
 
 ```yaml
 mv4_grid_static:            # configs/views.yaml
@@ -25,7 +25,7 @@ mv4_grid_static:            # configs/views.yaml
 The train tree is packed with the same geometry (wrist cells black, never
 read), so the tree and the bench clips are one layout. Reader:
 `airbot_mmk2.humanoid_mv.mv4_grid_static` (robot `airbot_mmk2`, corpus
-`humanoid_mv` — same corpus blocks as the other multiview readers in
+`humanoid_mv`, the same corpus blocks as the other multiview readers in
 `configs/cells.yaml`).
 
 ## 1. Download
@@ -53,8 +53,8 @@ mv $KINESCORE_CKPT_DIR/$R.train_log.jsonl $KINESCORE_CKPT_DIR/$R.diff.train_log.
 ```
 
 Reference: `val_mm 104.0` at 6000 steps (best 103.9 at 5000, train 17.5).
-Same order as bimanual (~100) and above the singleview humanoid readers —
-a 384x216 panel gives each keypoint few pixels; compare within the view.
+Same order as bimanual (~100) and above the singleview humanoid readers: a
+384x216 panel gives each keypoint few pixels. Compare within the view.
 
 ## 3. Score
 
@@ -74,10 +74,10 @@ real-motion baseline (see METRICS.md "Segment-level baseline"):
 
 | detector | dreamgen multiview | real baseline | reading |
 |---|---|---|---|
-| rigidity | 4.4% | 1.4% | +3.0 excess — mild warping |
-| jerk | 0.0% | 33.4% | far below real — motion smoother than the robot |
-| teleport | 2.6% | 39.2% | far below real — same |
-| joint_limit | 89.1% | 51.4% | +37.7 excess — the strongest signal |
+| rigidity | 4.4% | 1.4% | +3.0 excess: mild warping |
+| jerk | 0.0% | 33.4% | far below real: motion smoother than the robot |
+| teleport | 2.6% | 39.2% | far below real, same |
+| joint_limit | 89.1% | 51.4% | +37.7 excess: the strongest signal |
 | self_collision | 10.0% | 16.6% | below real |
 
 The generated motion is slower and smoother than the real corpus, so the
@@ -103,14 +103,14 @@ Bucket targets: `train/<reader>/diffusion/`,
 
 Three files, in order:
 
-1. `configs/views.yaml` — measure one panel from the clips (seams stand an
+1. `configs/views.yaml`: measure one panel from the clips (seams stand an
    order of magnitude above the median column/row difference), declare
    `packing`, `n_panels`, `panel`; a static subset is `panels: [...]` by
    index into the packed frame.
-2. `configs/cells.yaml` — a corpus block (`root`, `adapter`, `cameras` in
+2. `configs/cells.yaml`: a corpus block (`root`, `adapter`, `cameras` in
    panel order, `joint_field`, `joint_columns`), a reader
    (`<robot>.<corpus>.<view>`), and a cell naming that reader.
-3. `src/kinescore/robots/<robot>/` + `configs/robots.yaml` — URDF under
+3. `src/kinescore/robots/<robot>/` + `configs/robots.yaml`: URDF under
    `$KINESCORE_ASSETS` (mirror: bucket `assets/`), an FK spec naming the
    keypoint links, registered in `robots/__init__.py`. `docs/BIMANUAL.md`
    documents the latest such port end to end.
